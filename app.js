@@ -378,7 +378,8 @@ function homeHTML(){
     <p class="small" style="margin:8px 0 0;opacity:.85">「問題」で復習に送った問題が、忘れかけたころにここに出てくるよ。</p></div>`;
   h += `<div class="btns" style="margin:-2px 0 12px"><button class="btn sec" data-act="nav" data-v="practice">練習（何周でも）</button><button class="btn sec" data-act="nav" data-v="year">年号ドリル</button></div>`;
   h += `<div class="card"><h2>この先の予定</h2><div class="stats">
-    <div><b>${within(1)}</b><span>明日</span></div><div><b>${within(7)}</b><span>7日以内</span></div><div><b>${pool.length}</b><span>復習に入っている問題</span></div></div></div>`;
+    <div><b>${within(1)}</b><span>明日</span></div><div><b>${within(7)}</b><span>7日以内</span></div><div><b>${pool.length}</b><span>復習に入っている問題</span></div></div>
+    ${pool.length ? `<div style="height:10px"></div><button class="btn line" data-act="goSrsList">復習に入っている問題を見る・外す</button>` : ""}</div>`;
   if (!live().length){
     h += `<div class="card"><h2>使い方</h2><ol class="guide">
       <li>「追加」で一問一答や、年号つきの出来事を登録する。Claude に作ってもらったものは「まとめて取り込む」に貼り付ける</li>
@@ -402,7 +403,7 @@ function reviewHTML(){
   if (!s.shown) h += `<button class="btn" data-act="show">答えを見る</button>`;
   else h += `<div class="rate">${["もう一度","難しい","正解","簡単"].map((n, r) =>
       `<button class="r${r}" data-act="rate" data-r="${r}">${n}<small>${fmtIv(schedule(c, r).interval)}</small></button>`).join("")}</div>`;
-  h += `<div class="links"><button class="link" data-act="edit" data-id="${esc(c.id)}">この問題を直す</button><button class="link" data-act="quit">中断する</button></div>`;
+  h += `<div class="links"><button class="link" data-act="edit" data-id="${esc(c.id)}">この問題を直す</button><button class="link" data-act="rOut">復習から外す</button><button class="link" data-act="quit">中断する</button></div>`;
   return h;
 }
 function qHTML(c, shown){
@@ -541,14 +542,15 @@ function quizHTML(){
   const ok = Q.judged;
   h += `<div class="card"><div class="res ${ok ? "ok" : "ng"}">${ok ? "○ 正解" : "× 不正解"}</div>`;
   if (!inR){
-    const send = `<button class="btn ${ok ? "line" : ""}" data-act="qNext" data-do="send">復習に送って次へ</button>`;
-    const skip = `<button class="btn ${ok ? "" : "line"}" data-act="qNext" data-do="">送らずに次へ</button>`;
-    h += `<p class="small" style="margin:6px 0 10px">この問題を毎日の復習に送る？送ると、忘れかけたころに「今日の復習」で出てくるよ。</p>`
-      + (ok ? `<div class="btns">${skip}</div><div class="btns">${send}</div>` : `<div class="btns">${send}</div><div class="btns">${skip}</div>`);
+    // 上の青いボタンは、正解でも不正解でも「復習に送って次へ」
+    h += `<p class="small" style="margin:6px 0 10px">この問題を毎日の復習に送る？送ると、忘れかけたころに「今日の復習」で出てくるよ。</p>
+      <div class="btns"><button class="btn" data-act="qNext" data-do="send">復習に送って次へ</button></div>
+      <div class="btns"><button class="btn line" data-act="qNext" data-do="">送らずに次へ</button></div>`;
   } else {
     h += `<p class="small" style="margin:6px 0 10px">この問題はもう毎日の復習に入っています（${c.reps ? "次の復習：" + esc(dueLabel(c)) : "まだ一度も復習していない"}）。</p>`
-      + (ok ? `<div class="btns"><button class="btn" data-act="qNext" data-do="">次へ</button></div><div class="btns"><button class="btn line" data-act="qNext" data-do="out">復習から外して次へ</button></div>`
-            : `<div class="btns"><button class="btn" data-act="qNext" data-do="today">今日の復習に回して次へ</button></div><div class="btns"><button class="btn line" data-act="qNext" data-do="">このまま次へ</button></div>`);
+      + (ok ? `<div class="btns"><button class="btn" data-act="qNext" data-do="">次へ</button></div>`
+            : `<div class="btns"><button class="btn" data-act="qNext" data-do="today">今日の復習に回して次へ</button></div><div class="btns"><button class="btn line" data-act="qNext" data-do="">このまま次へ</button></div>`)
+      + `<div class="btns"><button class="btn line" data-act="qNext" data-do="out">復習から外して次へ</button></div>`;
   }
   return h + `</div>` + quizLinks(c);
 }
@@ -998,23 +1000,23 @@ function chapPromoHTML(){
 /* ---------- 画面：一覧・設定 ---------- */
 function listHTML(){
   return `<input type="search" id="q" placeholder="検索（問題・答え・メモ・タグ）" value="${esc(S.q)}"><div style="height:10px"></div>
-    ${kvChips(S.listKind, "lKind", "k", [["all", "すべて"], ["card", "一問一答"], ["event", "出来事"]])}
+    ${kvChips(S.listKind, "lKind", "k", [["all", "すべて"], ["card", "一問一答"], ["event", "出来事"], ["srs", "復習に入っている"]])}
     ${chips(S.listDeck, "lDeck", ["すべて", ...decks()])}<div class="card" style="padding:4px 14px" id="list-items"></div>`;
 }
 function renderListItems(){
   const el = $("#list-items"); if (!el) return;
   const q = S.q.trim().toLowerCase(), k = S.listKind;
-  const items = live().filter(c => inDeck(c, S.listDeck) && (k === "all" || (k === "event") === isEv(c)))
+  const items = live().filter(c => inDeck(c, S.listDeck) && (k === "all" || (k === "srs" ? c.srs !== false : (k === "event") === isEv(c))))
     .filter(c => !q || [c.front, c.back, c.memo, c.title, rName(c.region), ...tagsOf(c)].join(" ").toLowerCase().includes(q))
     .sort((a, b) => (b.created || 0) - (a.created || 0));
-  if (!items.length){ el.innerHTML = `<p class="muted">${live().length ? "見つかりませんでした。" : "まだ問題がありません。"}</p>`; return; }
+  if (!items.length){ el.innerHTML = `<p class="muted">${k === "srs" && !q ? "毎日の復習に入っている問題はありません。" : live().length ? "見つかりませんでした。" : "まだ問題がありません。"}</p>`; return; }
   const shown = items.slice(0, 300);
   const tagStr = c => tagsOf(c).length ? " ・ " + tagsOf(c).map(esc).join(" ") : "";
   el.innerHTML = shown.map(c => isEv(c)
     ? `<button class="item" data-act="ev" data-id="${esc(c.id)}"><div class="iq">${esc(c.title)}</div><div class="ia">${esc(yearLabel(c))}</div>
       <div class="im">出来事 ・ ${esc(rName(c.region))}${tagStr(c)} ・ ${c.srs === false ? "復習なし" : dueLabel(c)}</div></button>`
     : `<button class="item" data-act="edit" data-id="${esc(c.id)}"><div class="iq">${esc(c.front)}</div><div class="ia">${esc(c.back)}</div>
-      <div class="im">${esc(deckOf(c))}${tagStr(c)} ・ ${dueLabel(c)}</div></button>`).join("")
+      <div class="im">${esc(deckOf(c))}${tagStr(c)} ・ ${c.srs === false ? "復習なし" : dueLabel(c)}</div></button>`).join("")
     + (items.length > shown.length ? `<p class="muted small">ほか ${items.length - shown.length} 件（検索で絞り込んでね）</p>` : "");
 }
 function settingsHTML(){
@@ -1075,7 +1077,9 @@ function cardSheetHTML(top){
     <div><label class="f">タグ</label><input type="text" data-bind="edit.tags" value="${esc(e.tags)}"></div></div>
     ${rel.length ? `<label class="f">関連する出来事</label><div class="chipline" style="margin-top:0">${rel.map(evChip).join("")}</div>` : ""}
     <div class="btns"><button class="btn" data-act="saveEdit">保存</button></div>
-    <div class="btns"><button class="btn sec" data-act="dueNow">今日の復習に入れる</button></div>
+    <h3 class="sub">毎日の復習</h3><div class="kv"><span>${c.srs === false ? "入っていない" : "入っている"}</span><span>${c.srs === false ? "" : esc(dueLabel(c))}</span></div>
+    <div class="btns" style="margin-top:4px"><button class="btn sec" data-act="srsToggle" data-id="${esc(c.id)}">${c.srs === false ? "毎日の復習に入れる" : "毎日の復習から外す"}</button></div>
+    ${c.srs === false ? "" : `<div class="btns"><button class="btn line" data-act="dueNow">今日の復習に出す</button></div>`}
     <div class="btns"><button class="btn danger ${S.confirmDel ? "sure" : ""}" data-act="del">${S.confirmDel ? "本当に削除する" : "この問題を削除"}</button></div>`;
 }
 function evSheetHTML(top){
@@ -1177,6 +1181,12 @@ const act = {
     s.idx++; s.shown = false; renderMain(); window.scrollTo(0, 0);
   },
   quit(){ S.session = null; S.view = "home"; renderMain(); },
+  rOut(){
+    const s = S.session, id = s.queue[s.idx]; if (!card(id)) return;
+    updateCard(id, { srs: false }); commit();
+    s.queue = s.queue.filter((x, i) => i < s.idx || x !== id);   // この先に「もう一度」で残っている分も出さない
+    s.shown = false; toast("毎日の復習から外しました"); renderMain(); window.scrollTo(0, 0);
+  },
   pDeck(el){ S.pset.deck = el.dataset.d; S.pset.tag = ""; renderMain(); },
   pTag(el){ S.pset.tag = el.dataset.d; renderMain(); },
   pOrder(el){ S.pset.order = el.dataset.d === "ランダム" ? "random" : "created"; renderMain(); },
@@ -1283,7 +1293,7 @@ const act = {
     if (old.srs === false && f.srs) patch.due = Date.now();
     updateCard(top.id, patch); commit(); popSheet(); toast("保存しました"); afterEdit();
   },
-  dueNow(){ updateCard(topSheet().id, { due: Date.now() }); commit(); popSheet(); toast("今日の復習に入れました"); afterEdit(); },
+  dueNow(){ updateCard(topSheet().id, { srs: true, due: Date.now() }); commit(); popSheet(); toast("今日の復習に入れました"); afterEdit(); },
   srsToggle(el){
     const e = card(el.dataset.id); if (!e) return;
     updateCard(e.id, e.srs === false ? { srs: true, due: Date.now() } : { srs: false }); commit();
@@ -1454,6 +1464,7 @@ const act = {
   /* 一覧・設定 */
   lDeck(el){ S.listDeck = el.dataset.d; renderMain(); },
   lKind(el){ S.listKind = el.dataset.v; renderMain(); },
+  goSrsList(){ S.listKind = "srs"; S.listDeck = "すべて"; S.q = ""; S.view = "list"; renderMain(); window.scrollTo(0, 0); },
   syncNow(){ sync(true); },
   async saveSettings(){
     const f = S.form;
