@@ -111,24 +111,75 @@ textarea.tall{min-height:180px}
 .done .big{font-size:30px;font-weight:700}
 .kv{display:flex;justify-content:space-between;font-size:14px;padding:4px 0}
 .kv span:first-child{color:var(--sub)}
+.hdr-r{display:flex;align-items:center;gap:6px}
+.gear{border:0;background:none;font-size:20px;line-height:1;color:var(--sub);cursor:pointer;padding:4px}
+a.btn{text-align:center;text-decoration:none}
+.seg.s3 button,.seg.s4 button{font-size:13px;padding:8px 2px}
+.chips.wrap{flex-wrap:wrap;overflow:visible}
+select{width:100%;border:1px solid var(--line);background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%235b6472' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 12px center;border-radius:10px;padding:10px 30px 10px 12px;font-size:16px;-webkit-appearance:none;appearance:none}
+.ev{display:flex;gap:10px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;padding:10px 4px;cursor:pointer;align-items:flex-start}
+.ev:last-child{border-bottom:0}
+.ev .yr{flex:0 0 auto;min-width:52px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+.ev .evb{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ev .tt{font-weight:600}
+.ev .ds{font-size:13px;color:var(--sub)}
+.ev.cur{background:var(--soft);border-radius:10px;cursor:default}
+.ev .mark{flex:0 0 auto;font-weight:700;width:1.1em}
+.mark.ok{color:var(--green)}.mark.ng{color:var(--red)}
+.rg{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);font-weight:400}
+.rg i{width:8px;height:8px;border-radius:50%;display:inline-block}
+h2 .rg{font-size:16px;font-weight:700;color:var(--ink)}
+h2 .rg i{width:10px;height:10px}
+.sech{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-bottom:6px;margin-bottom:2px;border-bottom:2px solid var(--soft2)}
+.sech b{font-size:15px}
+.sech .rg{font-size:15px;font-weight:700;color:var(--ink)}
+.card .sech:not(:first-child){margin-top:14px}
+.mini{border:0;background:var(--soft);color:var(--accent);border-radius:999px;padding:4px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
+.mini:disabled{opacity:.35;cursor:default}
+.memo{background:#f7f9fc;border-left:3px solid var(--accent2);border-radius:6px 12px 12px 6px;padding:8px 12px;font-size:14px;margin:8px 0;cursor:pointer;word-break:break-word}
+.stepper{display:flex;justify-content:space-between;align-items:center}
+.big-q{font-size:20px;font-weight:700;word-break:break-word}
+.slots{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+.slot{display:flex;align-items:center;gap:10px;border:1.5px dashed #cfd5de;border-radius:12px;padding:9px 12px;min-height:46px;background:var(--bg);font-size:15px;text-align:left;width:100%}
+.slot.fill{border:1.5px solid var(--soft2);background:var(--soft);cursor:pointer;font-weight:600}
+.slot .no{font-weight:700;color:var(--accent);min-width:1.2em}
+.opts{display:flex;flex-direction:column;gap:8px}
+.opt{display:flex;flex-direction:column;gap:2px;border:1.5px solid var(--line);background:var(--card);border-radius:12px;padding:11px 14px;text-align:left;font-size:16px;font-weight:600;cursor:pointer}
+.opt.center{align-items:center;font-size:18px}
+.opt .sub{font-weight:400}
+.opt span.sub{font-size:13px;color:var(--sub)}
+.opt:disabled{cursor:default;opacity:1}
+.opt.ok{border-color:#7cc596;background:#eaf6ee;color:var(--green)}
+.opt.ng{border-color:#e9a0a0;background:#fdeceb;color:var(--red)}
+.res{font-weight:700;margin-bottom:4px}
+.res.ok{color:var(--green)}.res.ng{color:var(--red)}
+.yin{font-size:24px !important;text-align:center;font-weight:700;margin-top:10px}
+.evy{font-size:28px;font-weight:700;color:var(--accent);line-height:1.25;margin-top:4px}
+.evt{font-size:20px;font-weight:700;margin:0 0 4px}
+.shtop{display:flex;justify-content:space-between;margin:-8px 0 4px}
+.chipline{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.rchip{border:1px solid var(--soft2);background:var(--soft);color:var(--accent);border-radius:999px;padding:4px 11px;font-size:13px;cursor:pointer;text-align:left}
+.rchip.gray{background:#f3f4f6;border-color:var(--line);color:var(--sub)}
+h3.sub{font-size:13px;color:var(--sub);margin:18px 0 2px;font-weight:700}
 </style>
 </head>
 <body>
 <header>
   <h1 id="ttl">世界史</h1>
-  <button class="pill gray" id="sync-pill" data-act="nav" data-v="settings">未設定</button>
+  <div class="hdr-r"><button class="pill gray" id="sync-pill" data-act="nav" data-v="settings">未設定</button><button class="gear" data-act="nav" data-v="settings" aria-label="設定">⚙︎</button></div>
 </header>
 <main id="main"><p class="muted">読み込み中…</p></main>
 <nav class="tabs" id="tabs">
   <button data-act="nav" data-v="home"><span class="ic">◎</span>復習</button>
-  <button data-act="nav" data-v="practice"><span class="ic">↻</span>練習</button>
+  <button data-act="nav" data-v="year"><span class="ic">⇅</span>年号</button>
+  <button data-act="nav" data-v="note"><span class="ic">▤</span>ノート</button>
   <button data-act="nav" data-v="add"><span class="ic">＋</span>追加</button>
   <button data-act="nav" data-v="list"><span class="ic">≡</span>一覧</button>
-  <button data-act="nav" data-v="settings"><span class="ic">⚙︎</span>設定</button>
 </nav>
 <div id="sheet"><div class="inner" id="sheet-inner"></div></div>
 <div id="toast"></div>
 <input type="file" id="import-file" accept="application/json,.json" hidden>
+<script src="starter.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
