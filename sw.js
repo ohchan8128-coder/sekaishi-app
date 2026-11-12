@@ -1,5 +1,5 @@
 // オフラインでもアプリを開けるようにするための仕組み（GitHub API の通信には関わらない）
-const CACHE = "sekaishi-v3";
+const CACHE = "sekaishi-v4";
 const ASSETS = ["./", "./index.html", "./app.js", "./starter.js", "./chapters.js", "./manifest.json", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

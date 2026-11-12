@@ -10,7 +10,8 @@
  */
 const DAY = 86400000;
 const DEFAULT_DECK = "世界史";
-const LS = { cards: "sk.cards", token: "sk.token", settings: "sk.settings", dirty: "sk.dirty", last: "sk.lastSync", chap: "sk.chap" };
+const LS = { cards: "sk.cards", token: "sk.token", settings: "sk.settings", dirty: "sk.dirty", last: "sk.lastSync", chap: "sk.chap", qset: "sk.qset" };
+const CH_META_ID = "meta|chapters-all";
 const REGIONS = ["ヨーロッパ", "西アジア", "南アジア", "東南アジア", "中国", "朝鮮・日本", "内陸アジア", "アフリカ", "アメリカ", "国際"];
 const RCOLOR = { "ヨーロッパ": "#2563eb", "西アジア": "#a16207", "南アジア": "#db2777", "東南アジア": "#059669", "中国": "#dc2626",
   "朝鮮・日本": "#7c3aed", "内陸アジア": "#0891b2", "アフリカ": "#65a30d", "アメリカ": "#ea580c", "国際": "#475569" };
@@ -45,6 +46,8 @@ const S = {
   view: "home", deck: "すべて",
   session: null, practice: null,
   pset: { deck: "すべて", tag: "", order: "random", count: 20 },
+  qset: Object.assign({ chap: "", region: "", era: "", order: "random", count: 20 }, lsGet("sk.qset", {})),
+  quiz: null,
   add: { mode: "one", deck: DEFAULT_DECK, tags: "", front: "", back: "", memo: "", bulk: "", bulkKind: "event", bulkRegion: "", bsrs: true, confirmStarterDel: false },
   aev: { title: "", year: "", region: "", desc: "", tags: "", related: "", srs: true },
   yset: { mode: "sort", region: "すべて", from: "", to: "", tag: "", n: 4, near: false, total: 10 },
@@ -63,7 +66,7 @@ function nl(s){ return esc(s).replace(/\n/g, "<br>"); }
 function startOfDay(t){ const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
 function endOfToday(){ return startOfDay(Date.now()) + DAY - 1; }
 function newId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
-function live(){ return S.cards.filter(c => !c.deleted && c.kind !== "note"); }
+function live(){ return S.cards.filter(c => !c.deleted && c.kind !== "note" && c.kind !== "meta"); }
 function card(id){ return S.cards.find(c => c.id === id && !c.deleted); }
 function isEv(c){ return !!c && c.kind === "event" && Number.isFinite(c.year); }
 function evs(){ return live().filter(isEv); }
@@ -200,11 +203,11 @@ function schedule(c, r){
 }
 
 /* ---------- 変更の保存 ---------- */
-function commit(){
+function commit(ms){
   S.localVer++;
   if (!lsSet(LS.cards, S.cards)) toast("端末に保存できませんでした（容量不足？）");
   lsSet(LS.dirty, true);
-  renderPill(); scheduleSync();
+  renderPill(); scheduleSync(ms);
 }
 function putCard(c){
   c.updatedAt = Date.now();
@@ -305,6 +308,7 @@ async function sync(manual){
       ok = true;
     }
     if (!ok) throw new HttpError(409);
+    ensureChapterCards();   // 記録をGitHubから受け取ってから、章の問題をまだ入れていなければ入れる
     if (S.localVer === v0) lsSet(LS.dirty, false); else again = true;
     lsSet(LS.last, Date.now());
     S.sync = { state: "ok", msg: "" };
@@ -364,18 +368,21 @@ function homeHTML(){
   const due = dueList(S.deck), newN = due.filter(c => !c.reps).length;
   const pool = live().filter(c => c.srs !== false && inDeck(c, S.deck)); const t0 = startOfDay(Date.now());
   const within = n => pool.filter(c => c.reps && (c.due || 0) > endOfToday() && (c.due || 0) < t0 + (n + 1) * DAY).length;
-  let h = chips(S.deck, "deck", ["すべて", ...decks()]);
+  let h = "";
   if (!token()) h += `<div class="note">記録を GitHub に保存するには、まず<b>設定</b>（右上の ⚙︎）でトークンを入れてね。今のままでもこの端末の中には保存されるよ。</div>`;
-  h += `<div class="card hero"><div class="big">${due.length}</div><div class="lbl">今日の問題</div>
+  h += quizSetupHTML();
+  if (decks().length > 1) h += chips(S.deck, "deck", ["すべて", ...decks()]);
+  h += `<div class="card hero"><div class="big">${due.length}</div><div class="lbl">今日の復習</div>
     <div class="sub">復習 ${due.length - newN}・新しい問題 ${newN}</div>
-    <button class="btn" data-act="start" ${due.length ? "" : "disabled"}>${due.length ? "始める" : "今日の分は終わり！"}</button></div>`;
+    <button class="btn" data-act="start" ${due.length ? "" : "disabled"}>${due.length ? "復習を始める" : pool.length ? "今日の分は終わり！" : "まだ復習に送った問題がありません"}</button>
+    <p class="small" style="margin:8px 0 0;opacity:.85">「問題」で復習に送った問題が、忘れかけたころにここに出てくるよ。</p></div>`;
   h += `<div class="btns" style="margin:-2px 0 12px"><button class="btn sec" data-act="nav" data-v="practice">練習（何周でも）</button><button class="btn sec" data-act="nav" data-v="year">年号ドリル</button></div>`;
   h += `<div class="card"><h2>この先の予定</h2><div class="stats">
     <div><b>${within(1)}</b><span>明日</span></div><div><b>${within(7)}</b><span>7日以内</span></div><div><b>${pool.length}</b><span>復習に入っている問題</span></div></div></div>`;
   if (!live().length){
     h += `<div class="card"><h2>使い方</h2><ol class="guide">
       <li>「追加」で一問一答や、年号つきの出来事を登録する。Claude に作ってもらったものは「まとめて取り込む」に貼り付ける</li>
-      <li>毎日「復習」を開くと、忘れかけた問題だけが出てくる</li>
+      <li>「問題」で範囲を選んで解き、覚えたい問題を毎日の復習に送ると、忘れかけたころに出てくる</li>
       <li>「ノート」の「章ごと」で、教科書の流れに沿った全24章のまとめを読み、その章の一問一答をまとめて追加できる</li>
       <li>「年号」で並び替え・年号当て、「ノート」で地域ごと・年代ごとのまとめが見られる</li>
       <li>好きな範囲を何周もしたいときは「練習」</li></ol></div>`;
@@ -448,6 +455,115 @@ function practiceHTML(){
     <label class="f">問題数</label>${chips(p.count ? p.count + "問" : "全部", "pCount", ["10問", "20問", "50問", "全部"])}
     <div style="height:8px"></div><button class="btn" data-act="pStart" ${n ? "" : "disabled"}>${n ? `始める（対象 ${n}問）` : "対象の問題がありません"}</button></div>`;
   return h;
+}
+
+/* ---------- 画面：問題（範囲を選んでランダム出題） ---------- */
+const ERAS = [["A", "古代", "〜5世紀"], ["M", "中世", "6〜15世紀"], ["E", "近世", "16〜18世紀"], ["K", "近代", "19世紀〜1914年"], ["G", "現代", "1914年〜"]];
+function eraName(code){ const x = ERAS.find(e => e[0] === code); return x ? x[1] : ""; }
+let CHMETA = null;
+// 章の問題のID → { no: 章, r: [地域], e: "時代コード" }
+function chMeta(id){
+  if (!CHMETA){
+    CHMETA = new Map();
+    chList().forEach(ch => ch.qa.forEach(x => CHMETA.set(chId(ch, x[0]), { no: ch.no, r: String(x[2] || "").split(",").filter(Boolean), e: String(x[3] || "") })));
+  }
+  return CHMETA.get(id) || null;
+}
+// 章の問題を全部「問題」に入れる（最初の1回だけ。毎日の復習には入れない）
+// 更新時刻をいちばん古い値にしておくので、同期やバックアップの記録（解いた結果・削除）が必ず優先される
+function ensureChapterCards(){
+  if (!chList().length || S.cards.some(c => c.id === CH_META_ID)) return false;
+  const ids = new Set(S.cards.map(c => c.id)), t = Date.now(); let n = 0, k = 0;
+  const putOld = c => { putCard(c); c.updatedAt = 1; };
+  chList().forEach(ch => ch.qa.forEach(([q, a]) => {
+    const id = chId(ch, q); k++;
+    if (ids.has(id)) return;   // すでにある（自分で消したものも含む）ならそのまま
+    putOld({ id, deck: DEFAULT_DECK, tags: [chTag(ch)], front: q, back: a, memo: "", created: t + k, due: t,
+             interval: 0, ease: 2.5, reps: 0, lapses: 0, srs: false });
+    n++;
+  }));
+  putOld({ id: CH_META_ID, kind: "meta", text: "章の一問一答を全部追加済み" });
+  commit();
+  if (n) toast(`章の一問一答 ${n}問を「問題」に入れました`);
+  return true;
+}
+function saveQset(){ lsSet(LS.qset, S.qset); }
+function qsetLabel(p){
+  return [p.chap ? `第${p.chap}章 ${(chOf(p.chap) || {}).short || ""}` : "全範囲", p.region, p.era ? eraName(p.era) : ""].filter(Boolean).join(" ・ ");
+}
+function quizPool(){
+  const p = S.qset, filtered = p.chap || p.region || p.era;
+  return live().filter(c => !isEv(c)).filter(c => {
+    if (!filtered) return true;
+    const m = chMeta(c.id); if (!m) return false;
+    return (!p.chap || m.no === +p.chap) && (!p.region || m.r.includes(p.region)) && (!p.era || m.e.includes(p.era));
+  }).filter(c => p.order !== "wrong" || (c.qng || 0) > 0);
+}
+function wrapChips(h){ return h.replace('<div class="chips">', '<div class="chips wrap">'); }
+function quizSetupHTML(){
+  const p = S.qset, n = quizPool().length;
+  let h = `<div class="card"><h2>問題を解く</h2><p class="muted small" style="margin-top:-4px">範囲を選ぶと、その中からランダムに出題するよ。答え合わせのあとに、毎日の復習に送るかを選べる。</p>
+    <label class="f">章</label><select data-qsel="chap"><option value="">全範囲（すべての章）</option>${chList().map(c => `<option value="${c.no}" ${String(c.no) === String(p.chap) ? "selected" : ""}>第${c.no}章 ${esc(c.short)}</option>`).join("")}</select>
+    <label class="f">地域</label>${wrapChips(kvChips(p.region, "qSet", "region", [["", "すべて"], ...REGIONS.map(r => [r, r])]))}
+    <label class="f">時代</label>${wrapChips(kvChips(p.era, "qSet", "era", [["", "すべて"], ...ERAS.map(([v, l, s]) => [v, `${l}（${s}）`])]))}
+    <label class="f">出し方</label>${wrapChips(kvChips(p.order, "qSet", "order", [["random", "ランダム"], ["fresh", "まだ出ていない問題から"], ["wrong", "×をつけたことがある問題だけ"]]))}
+    <label class="f">問題数</label>${wrapChips(kvChips(String(p.count), "qSet", "count", [["10", "10問"], ["20", "20問"], ["50", "50問"], ["0", "全部"]]))}
+    <div style="height:8px"></div><button class="btn" data-act="qStart" ${n ? "" : "disabled"}>${n ? `始める（対象 ${n}問）` : "対象の問題がありません"}</button>`;
+  if (!n) h += `<p class="muted small">${p.order === "wrong" ? "この範囲で×をつけた問題はまだありません。" : "この組み合わせの問題はありません。"}条件を変えてみてね。</p>`;
+  return h + `</div>`;
+}
+function quizMeta(c){
+  const m = chMeta(c.id);
+  const parts = m ? [`第${m.no}章 ${(chOf(m.no) || {}).short || ""}`, m.r.join("・"), [...m.e].map(eraName).join("〜")] : [deckOf(c), ...tagsOf(c)];
+  if (c.srs !== false) parts.push("復習に入っている");
+  return parts.filter(Boolean).map(esc).join(" ・ ");
+}
+function quizLinks(c){ return `<div class="links"><button class="link" data-act="edit" data-id="${esc(c.id)}">この問題を直す</button><button class="link" data-act="qQuit">やめる</button></div>`; }
+function quizHTML(){
+  const Q = S.quiz; if (!Q){ S.view = "home"; return homeHTML(); }
+  while (Q.idx < Q.queue.length && !card(Q.queue[Q.idx])) Q.idx++;
+  if (Q.idx >= Q.queue.length) return quizDoneHTML();
+  const c = card(Q.queue[Q.idx]), inR = c.srs !== false;
+  const okN = Object.values(Q.res).filter(x => x === true).length, ngN = Object.values(Q.res).filter(x => x === false).length;
+  let h = `<div class="progress"><i style="width:${Math.round(Q.idx / Q.queue.length * 100)}%"></i></div>
+    <div class="muted small" style="margin-bottom:8px">${Q.round > 1 ? "×の解き直し　" : ""}${Q.idx + 1} / ${Q.queue.length}　・　○ ${okN}　× ${ngN}</div>
+    <div class="card q"><div class="meta">${quizMeta(c)}</div><div class="front">${nl(c.front)}</div>`;
+  if (Q.shown){
+    h += `<div class="back">${nl(c.back)}</div>`;
+    if (c.memo) h += `<details><summary>メモを見る</summary><div>${esc(c.memo)}</div></details>`;
+  }
+  h += `</div>`;
+  if (!Q.shown) return h + `<button class="btn" data-act="qShow">答えを見る</button>` + quizLinks(c);
+  if (Q.judged === null){
+    return h + `<p class="muted small" style="text-align:center;margin:0 0 6px">自分の答えは合っていた？</p>
+      <div class="two"><button class="x" data-act="qJudge" data-ok="0">× まちがえた</button><button class="o" data-act="qJudge" data-ok="1">○ 正解</button></div>` + quizLinks(c);
+  }
+  const ok = Q.judged;
+  h += `<div class="card"><div class="res ${ok ? "ok" : "ng"}">${ok ? "○ 正解" : "× 不正解"}</div>`;
+  if (!inR){
+    const send = `<button class="btn ${ok ? "line" : ""}" data-act="qNext" data-do="send">復習に送って次へ</button>`;
+    const skip = `<button class="btn ${ok ? "" : "line"}" data-act="qNext" data-do="">送らずに次へ</button>`;
+    h += `<p class="small" style="margin:6px 0 10px">この問題を毎日の復習に送る？送ると、忘れかけたころに「今日の復習」で出てくるよ。</p>`
+      + (ok ? `<div class="btns">${skip}</div><div class="btns">${send}</div>` : `<div class="btns">${send}</div><div class="btns">${skip}</div>`);
+  } else {
+    h += `<p class="small" style="margin:6px 0 10px">この問題はもう毎日の復習に入っています（${c.reps ? "次の復習：" + esc(dueLabel(c)) : "まだ一度も復習していない"}）。</p>`
+      + (ok ? `<div class="btns"><button class="btn" data-act="qNext" data-do="">次へ</button></div><div class="btns"><button class="btn line" data-act="qNext" data-do="out">復習から外して次へ</button></div>`
+            : `<div class="btns"><button class="btn" data-act="qNext" data-do="today">今日の復習に回して次へ</button></div><div class="btns"><button class="btn line" data-act="qNext" data-do="">このまま次へ</button></div>`);
+  }
+  return h + `</div>` + quizLinks(c);
+}
+function quizDoneHTML(){
+  const Q = S.quiz, ids = Q.queue.filter(id => card(id));
+  const okN = ids.filter(id => Q.res[id] === true).length, wrong = ids.filter(id => Q.res[id] === false);
+  const unsent = wrong.filter(id => card(id).srs === false);
+  let h = `<div class="card done"><div class="big">${okN} / ${okN + wrong.length} 正解</div><p class="muted">${esc(qsetLabel(Q.set))}</p></div>`;
+  if (wrong.length){
+    h += `<div class="card"><h2>×だった問題（${wrong.length}）</h2>${wrong.map(id => { const c = card(id);
+      return `<button class="item" data-act="edit" data-id="${esc(id)}"><div class="iq">${esc(c.front)}</div><div class="ia">${esc(c.back)}</div><div class="im">${c.srs === false ? "復習に入っていない" : "復習に入っている"}</div></button>`; }).join("")}
+      ${unsent.length ? `<div style="height:8px"></div><button class="btn sec" data-act="qSendWrong">まだ送っていない${unsent.length}問を復習に送る</button>` : ""}</div>
+      <button class="btn" data-act="qRetry">×だけもう一度</button>`;
+  }
+  return h + `<div class="btns"><button class="btn sec" data-act="qStart">同じ範囲で新しく出題</button><button class="btn line" data-act="qQuit">終わる</button></div>`;
 }
 
 /* ---------- 画面：年号ドリル ---------- */
@@ -857,13 +973,13 @@ function chapHTML(){
     const rest = have.length ? "残りを" : "";
     h += `<p class="muted small" style="margin-top:-4px">${have.length ? `${have.length}問は追加済み。残り${n - have.length}問を追加できるよ。` : "通史で習った章から追加していくのがおすすめ。"}タグ「${esc(chTag(ch))}」がつきます。</p>
       <div class="btns"><button class="btn" data-act="chAdd" data-v="1">${rest}毎日の復習に入れて追加</button></div>
-      <div class="btns"><button class="btn line" data-act="chAdd" data-v="0">${rest}練習用に追加（復習には入れない）</button></div>`;
+      <div class="btns"><button class="btn line" data-act="chAdd" data-v="0">${rest}問題に追加（復習には入れない）</button></div>`;
   }
   if (have.length){
     const allIn = inSrs === have.length;
     h += `<div class="kv"><span>追加済み</span><span>${have.length} / ${n}問</span></div>
       <div class="kv"><span>毎日の復習に入っている</span><span>${inSrs}問</span></div>
-      <div class="btns"><button class="btn sec" data-act="chPractice">この章を練習する（何周でも）</button></div>
+      <div class="btns"><button class="btn sec" data-act="chQuiz">この章から問題を出す</button></div>
       <div class="btns"><button class="btn line" data-act="chSrs" data-v="${allIn ? 0 : 1}">${allIn ? "この章を毎日の復習から外す" : "この章を全部、毎日の復習に入れる"}</button></div>
       <div class="btns"><button class="btn danger ${S.note.chDel === ch.no ? "sure" : ""}" data-act="chDel">${S.note.chDel === ch.no ? "本当に削除する（この章の復習の記録も消えます）" : "この章の問題をアプリから削除"}</button></div>`;
   }
@@ -875,7 +991,7 @@ function chapPromoHTML(){
   const list = chList(); if (!list.length) return "";
   const ids = liveIds(), total = list.reduce((s, c) => s + c.qa.length, 0);
   const have = list.reduce((s, c) => s + c.qa.filter(([q]) => ids.has(chId(c, q))).length, 0);
-  return `<div class="card"><h2>章別の一問一答とまとめ</h2><p class="muted small" style="margin-top:-4px">教科書の流れに沿った全${list.length}章・${total}問（Claude 作成）。章ごとのまとめを読んで、その章の問題をまとめて追加できるよ。${have ? `いま${have}問を追加済み。` : ""}</p>
+  return `<div class="card"><h2>章別の一問一答とまとめ</h2><p class="muted small" style="margin-top:-4px">教科書の流れに沿った全${list.length}章・${total}問（Claude 作成）。章ごとのまとめを読んで、その章から問題を出したり、まとめて毎日の復習に入れたりできるよ。${have ? `いま${have}問を追加済み。` : ""}</p>
     <button class="btn sec" data-act="goChap">ノートの「章ごと」を開く</button></div>`;
 }
 
@@ -1006,12 +1122,12 @@ function memoSheetHTML(top){
 
 function renderMain(){
   const m = $("#main"), v = S.view;
-  m.innerHTML = v === "home" ? homeHTML() : v === "review" ? reviewHTML() : v === "practice" ? practiceHTML()
+  m.innerHTML = v === "home" ? homeHTML() : v === "quiz" ? quizHTML() : v === "review" ? reviewHTML() : v === "practice" ? practiceHTML()
     : v === "year" ? yearHTML() : v === "note" ? noteHTML() : v === "add" ? addHTML() : v === "list" ? listHTML() : settingsHTML();
   if (v === "list") renderListItems();
   if (v === "note") renderNoteBody();
-  $("#ttl").textContent = { home: "世界史", review: "復習", practice: "練習", year: "年号", note: "ノート", add: "追加", list: "一覧", settings: "設定" }[v] || "世界史";
-  const tab = v === "review" || v === "practice" ? "home" : v;
+  $("#ttl").textContent = { home: "問題", quiz: "問題", review: "復習", practice: "練習", year: "年号", note: "ノート", add: "追加", list: "一覧", settings: "設定" }[v] || "世界史";
+  const tab = v === "review" || v === "practice" || v === "quiz" ? "home" : v;
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === tab));
   renderPill();
 }
@@ -1022,7 +1138,7 @@ function importBackup(text){
   let data; try { data = JSON.parse(text); } catch(e){ toast("JSON を読み取れませんでした"); return; }
   const cards = Array.isArray(data) ? data : data && Array.isArray(data.cards) ? data.cards : null;
   if (!cards){ toast("問題データが見つかりませんでした"); return; }
-  const valid = cards.filter(c => c && typeof c.id === "string" && (c.deleted || (c.kind === "note" && typeof c.text === "string")
+  const valid = cards.filter(c => c && typeof c.id === "string" && (c.deleted || c.kind === "meta" || (c.kind === "note" && typeof c.text === "string")
     || (typeof c.front === "string" && typeof c.back === "string")));
   const before = S.cards.filter(c => !c.deleted).length;
   S.cards = merge(S.cards, valid); commit();
@@ -1034,12 +1150,13 @@ function setPath(p, v){ const [a, b] = p.split("."); if (S[a]) S[a][b] = v; }
 function afterEdit(){
   if (S.view === "list") renderListItems();
   else if (S.view === "note") renderNoteBody();
-  else if (["review", "practice", "home", "year"].includes(S.view)) renderMain();
+  else if (["review", "practice", "home", "year", "quiz"].includes(S.view)) renderMain();
 }
 function focusYin(){ const i = $("#yin"); if (i) i.focus(); }
 const act = {
   nav(el){
-    const v = el.dataset.v;
+    let v = el.dataset.v;
+    if (v === "home" && S.quiz) v = "quiz";   // 解いている途中なら続きへ
     if (v !== "review") S.session = null;
     if (v !== "settings"){ S.form = null; S.testMsg = null; }
     S.add.confirmStarterDel = false;
@@ -1268,6 +1385,53 @@ const act = {
     let n = 0; chCards(ch).forEach(c => { deleteCard(c.id); n++; });
     S.note.chDel = null; commit(); toast(n + "問を削除しました"); renderNoteBody();
   },
+  /* 問題 */
+  qSet(el){ const k = el.dataset.k, v = el.dataset.v; S.qset[k] = k === "count" ? +v : v; saveQset(); renderMain(); },
+  qStart(){
+    const p = S.qset; let pool = quizPool(); if (!pool.length) return;
+    if (p.order === "fresh"){
+      const a = shuffle(pool.filter(c => !c.qn)), b = shuffle(pool.filter(c => c.qn)).sort((x, y) => (x.qlast || 0) - (y.qlast || 0));
+      pool = [...a, ...b];
+    } else pool = shuffle(pool);
+    if (p.count) pool = pool.slice(0, p.count);
+    S.quiz = { queue: pool.map(c => c.id), idx: 0, shown: false, judged: null, res: {}, round: 1, set: Object.assign({}, p) };
+    S.view = "quiz"; renderMain(); window.scrollTo(0, 0);
+  },
+  qShow(){ S.quiz.shown = true; renderMain(); },
+  qJudge(el){
+    const Q = S.quiz, id = Q.queue[Q.idx], c = card(id); if (!c) return;
+    const ok = el.dataset.ok === "1"; Q.judged = ok; Q.res[id] = ok;
+    updateCard(id, { qn: (c.qn || 0) + 1, qok: (c.qok || 0) + (ok ? 1 : 0), qng: (c.qng || 0) + (ok ? 0 : 1), qlast: Date.now() });
+    commit(30000); renderMain();
+  },
+  qNext(el){
+    const Q = S.quiz, id = Q.queue[Q.idx], c = card(id), d = el.dataset.do, t = Date.now();
+    if (c && d){
+      if (d === "send") updateCard(id, { srs: true, due: t });
+      else if (d === "today") updateCard(id, { due: t });
+      else if (d === "out") updateCard(id, { srs: false });
+      commit(30000);
+      toast(d === "send" ? "毎日の復習に送りました" : d === "today" ? "今日の復習に回しました" : "毎日の復習から外しました");
+    }
+    Q.idx++; Q.shown = false; Q.judged = null; renderMain(); window.scrollTo(0, 0);
+  },
+  qSendWrong(){
+    const Q = S.quiz, t = Date.now(); let n = 0;
+    Q.queue.filter(id => Q.res[id] === false).forEach(id => { const c = card(id); if (c && c.srs === false){ updateCard(id, { srs: true, due: t }); n++; } });
+    commit(); toast(`${n}問を毎日の復習に送りました`); renderMain();
+  },
+  qRetry(){
+    const Q = S.quiz, wrong = shuffle(Q.queue.filter(id => Q.res[id] === false && card(id)));
+    if (!wrong.length) return;
+    S.quiz = { queue: wrong, idx: 0, shown: false, judged: null, res: {}, round: Q.round + 1, set: Q.set };
+    renderMain(); window.scrollTo(0, 0);
+  },
+  qQuit(){ S.quiz = null; S.view = "home"; renderMain(); window.scrollTo(0, 0); },
+  chQuiz(){
+    const ch = chOf(S.note.chap); if (!ch) return;
+    S.qset.chap = String(ch.no); S.qset.region = ""; S.qset.era = ""; if (S.qset.order === "wrong") S.qset.order = "random"; saveQset();
+    S.quiz = null; S.session = null; S.view = "home"; renderMain(); window.scrollTo(0, 0);
+  },
   chPractice(){
     const ch = chOf(S.note.chap); if (!ch) return;
     S.pset.deck = "すべて"; S.pset.tag = chTag(ch); S.practice = null; S.session = null;
@@ -1364,6 +1528,7 @@ document.addEventListener("change", e => {
   const t = e.target;
   if (t.type === "checkbox") onField(e);
   if (t.dataset.ysel){ S.yset[t.dataset.ysel] = t.value; renderMain(); }
+  if (t.dataset.qsel){ S.qset[t.dataset.qsel] = t.value; saveQset(); renderMain(); }
 });
 document.addEventListener("keydown", e => {
   if (e.target.id === "yin" && e.key === "Enter" && !e.isComposing){ e.preventDefault(); act.yInCheck(); }
@@ -1381,6 +1546,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 /* ---------- 起動 ---------- */
+ensureChapterCards();
 renderMain();
 sync();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
