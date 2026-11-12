@@ -160,6 +160,15 @@ h2 .rg i{width:10px;height:10px}
 .chipline{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .rchip{border:1px solid var(--soft2);background:var(--soft);color:var(--accent);border-radius:999px;padding:4px 11px;font-size:13px;cursor:pointer;text-align:left}
 .rchip.gray{background:#f3f4f6;border-color:var(--line);color:var(--sub)}
+.chnote h4{font-size:15px;margin:16px 0 4px;color:var(--accent)}
+.chnote h4:first-child{margin-top:2px}
+.chnote ul{margin:0;padding-left:1.1em}
+.chnote li{font-size:14px;margin:4px 0;line-height:1.6}
+.chnote p{font-size:14px;margin:4px 0}
+details .qa{white-space:normal}
+.qa p{margin:0;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--ink)}
+.qa p:last-child{border-bottom:0}
+.qa b{display:block;color:var(--accent);font-weight:600}
 h3.sub{font-size:13px;color:var(--sub);margin:18px 0 2px;font-weight:700}
 </style>
 </head>
@@ -180,6 +189,7 @@ h3.sub{font-size:13px;color:var(--sub);margin:18px 0 2px;font-weight:700}
 <div id="toast"></div>
 <input type="file" id="import-file" accept="application/json,.json" hidden>
 <script src="starter.js"></script>
+<script src="chapters.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

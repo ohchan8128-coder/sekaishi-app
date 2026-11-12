@@ -10,7 +10,7 @@
  */
 const DAY = 86400000;
 const DEFAULT_DECK = "世界史";
-const LS = { cards: "sk.cards", token: "sk.token", settings: "sk.settings", dirty: "sk.dirty", last: "sk.lastSync" };
+const LS = { cards: "sk.cards", token: "sk.token", settings: "sk.settings", dirty: "sk.dirty", last: "sk.lastSync", chap: "sk.chap" };
 const REGIONS = ["ヨーロッパ", "西アジア", "南アジア", "東南アジア", "中国", "朝鮮・日本", "内陸アジア", "アフリカ", "アメリカ", "国際"];
 const RCOLOR = { "ヨーロッパ": "#2563eb", "西アジア": "#a16207", "南アジア": "#db2777", "東南アジア": "#059669", "中国": "#dc2626",
   "朝鮮・日本": "#7c3aed", "内陸アジア": "#0891b2", "アフリカ": "#65a30d", "アメリカ": "#ea580c", "国際": "#475569" };
@@ -49,7 +49,7 @@ const S = {
   aev: { title: "", year: "", region: "", desc: "", tags: "", related: "", srs: true },
   yset: { mode: "sort", region: "すべて", from: "", to: "", tag: "", n: 4, near: false, total: 10 },
   yd: null,
-  note: { mode: "region", region: null, cent: null, line: "すべて", q: "" },
+  note: { mode: "chap", region: null, cent: null, line: "すべて", q: "", chap: lsGet(LS.chap, 1), chDel: null },
   q: "", listDeck: "すべて", listKind: "all",
   sheet: [], edit: null, confirmDel: false,
   sync: { state: "idle", msg: "" }, localVer: 0,
@@ -376,6 +376,7 @@ function homeHTML(){
     h += `<div class="card"><h2>使い方</h2><ol class="guide">
       <li>「追加」で一問一答や、年号つきの出来事を登録する。Claude に作ってもらったものは「まとめて取り込む」に貼り付ける</li>
       <li>毎日「復習」を開くと、忘れかけた問題だけが出てくる</li>
+      <li>「ノート」の「章ごと」で、教科書の流れに沿った全24章のまとめを読み、その章の一問一答をまとめて追加できる</li>
       <li>「年号」で並び替え・年号当て、「ノート」で地域ごと・年代ごとのまとめが見られる</li>
       <li>好きな範囲を何周もしたいときは「練習」</li></ol></div>`;
   }
@@ -623,7 +624,7 @@ function yResultHTML(){
 /* ---------- 画面：ノート ---------- */
 function noteHTML(){
   return `<input type="search" id="nq" placeholder="出来事・まとめ・一問一答を検索" value="${esc(S.note.q)}"><div style="height:10px"></div>
-    <div class="seg">${[["region", "地域ごと"], ["era", "年代ごと"], ["line", "年表"]].map(([v, l]) =>
+    <div class="seg s4">${[["chap", "章ごと"], ["region", "地域ごと"], ["era", "年代ごと"], ["line", "年表"]].map(([v, l]) =>
       `<button class="${S.note.mode === v ? "on" : ""}" data-act="nMode" data-v="${v}">${l}</button>`).join("")}</div>
     <div style="height:10px"></div><div id="note-body"></div>`;
 }
@@ -631,6 +632,7 @@ function renderNoteBody(){
   const el = $("#note-body"); if (!el) return;
   const list = evs().sort(byYear), q = S.note.q.trim();
   if (q){ el.innerHTML = searchHTML(q, list); return; }
+  if (S.note.mode === "chap"){ el.innerHTML = chapHTML(); return; }
   if (!list.length){ el.innerHTML = emptyEvHTML(); return; }
   el.innerHTML = S.note.mode === "era" ? eraHTML(list) : S.note.mode === "line" ? lineHTML(list) : regionHTML(list);
 }
@@ -684,11 +686,15 @@ function searchHTML(q, list){
   const evHits = list.filter(e => has([e.title, e.desc, rName(e.region), yearLabel(e), centLabel(centuryOf(e.year)), ...tagsOf(e)]));
   const memoHits = S.cards.filter(c => !c.deleted && c.kind === "note" && has([c.text || "", noteLabel(c.key || "|")]));
   const cardHits = live().filter(c => !isEv(c) && has([c.front, c.back, c.memo, ...tagsOf(c)]));
-  if (!evHits.length && !memoHits.length && !cardHits.length) return `<div class="card"><p class="muted">「${esc(q)}」は見つかりませんでした。</p></div>`;
+  const ids = liveIds(), chHits = chList().filter(c => has([c.title, c.short, c.note]));
+  const qaHits = chList().flatMap(c => c.qa.filter(([qq, a]) => !ids.has(chId(c, qq)) && has([qq, a])).map(([qq, a]) => ({ c, q: qq, a })));
+  if (!evHits.length && !memoHits.length && !cardHits.length && !chHits.length && !qaHits.length) return `<div class="card"><p class="muted">「${esc(q)}」は見つかりませんでした。</p></div>`;
   let h = "";
+  if (chHits.length) h += `<div class="card"><h2>章のまとめ（${chHits.length}）</h2>${chHits.map(c => `<button class="item" data-act="chOpen" data-d="${c.no}"><div class="iq">第${c.no}章 ${esc(c.title)}</div><div class="im">${esc(chSnippet(c.note, ql))}</div></button>`).join("")}</div>`;
   if (evHits.length) h += `<div class="card"><h2>出来事（${evHits.length}）</h2>${evHits.slice(0, 100).map(e => evRow(e, { region: true, desc: true })).join("")}</div>`;
   if (memoHits.length) h += `<div class="card"><h2>まとめ（${memoHits.length}）</h2>${memoHits.map(n => `<div class="muted small" style="margin-top:8px">${esc(noteLabel(n.key || "|"))}</div>${memoView(n.key)}`).join("")}</div>`;
   if (cardHits.length) h += `<div class="card"><h2>一問一答（${cardHits.length}）</h2>${cardHits.slice(0, 100).map(c => `<button class="item" data-act="edit" data-id="${esc(c.id)}"><div class="iq">${esc(c.front)}</div><div class="ia">${esc(c.back)}</div></button>`).join("")}</div>`;
+  if (qaHits.length) h += `<div class="card"><h2>章の一問一答・まだ追加していないもの（${qaHits.length}）</h2>${qaHits.slice(0, 100).map(x => `<button class="item" data-act="chOpen" data-d="${x.c.no}"><div class="iq">${esc(x.q)}</div><div class="ia">${esc(x.a)}</div><div class="im">第${x.c.no}章 ${esc(x.c.short)}</div></button>`).join("")}</div>`;
   return h;
 }
 
@@ -731,7 +737,7 @@ function addHTML(){
       <label class="f">答え</label><textarea data-bind="add.back" placeholder="カノッサの屈辱">${esc(a.back)}</textarea>
       <label class="f">メモ（任意・復習のとき見られる）</label><textarea data-bind="add.memo">${esc(a.memo)}</textarea>
       <div style="height:12px"></div><button class="btn" data-act="addOne">追加する</button></div>`;
-    return h;
+    return h + chapPromoHTML();
   }
   if (a.mode === "event"){
     h += `<p class="muted small" style="margin:6px 0 0">年号つきで登録すると、年号ドリル・ノート・関連表示に使われるよ。</p>` + evFormFields("aev", S.aev)
@@ -747,7 +753,7 @@ function addHTML(){
       <textarea class="tall" data-bind="add.bulk" placeholder="1077年、ハインリヒ4世が教皇に謝罪した出来事は？ ｜ カノッサの屈辱">${esc(a.bulk)}</textarea>
       <p class="muted small" id="bulk-info">${bulkInfo(parsed)}</p>
       <button class="btn" data-act="addBulk" id="bulk-btn">${parsed.ok.length}問を追加</button>${promptBox("card")}</div>`;
-    return h;
+    return h + chapPromoHTML();
   }
   const parsed = parseBulkEvents(a.bulk, a.bulkRegion.trim());
   h += `<label class="f">1行に1つ、「年 ｜ 出来事 ｜ 地域 ｜ 説明」の形で貼り付け（地域・説明は省略可）</label>
@@ -805,6 +811,72 @@ function starterCardHTML(){
   h += have < list.length ? `<button class="btn sec" data-act="starterAdd">${have ? `残りの${list.length - have}件を追加` : `${list.length}件を追加`}</button>` : `<p class="small" style="margin:0">✓ 追加済み（タグ「${STARTER_TAG}」）</p>`;
   if (have) h += `<div style="height:8px"></div><button class="btn danger ${S.add.confirmStarterDel ? "sure" : ""}" data-act="starterDel">${S.add.confirmStarterDel ? "本当に削除する（自分で直したものも消えます）" : "基本セットを全部削除"}</button>`;
   return h + `</div>`;
+}
+
+/* ---------- 章別の一問一答とまとめ（chapters.js） ---------- */
+function chList(){ return typeof CHAPTERS !== "undefined" && Array.isArray(CHAPTERS) ? CHAPTERS : []; }
+function chOf(no){ const l = chList(); return l.find(c => c.no === +no) || l[0] || null; }
+function chTag(ch){ return `${ch.no}章・${ch.short}`; }
+// 問題文から決まるID（同じ問題を2回追加しないため）
+function chId(ch, q){ let h = 5381; const s = ch.no + "|" + q; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return `ch${ch.no}-` + h.toString(36); }
+function liveIds(){ return new Set(S.cards.filter(c => !c.deleted).map(c => c.id)); }
+function chCards(ch){ return ch.qa.map(([q]) => card(chId(ch, q))).filter(Boolean); }
+function chSnippet(text, ql){
+  const t = String(text || "").replace(/\s+/g, " "), i = t.toLowerCase().indexOf(ql);
+  if (i < 0) return t.slice(0, 50) + (t.length > 50 ? "…" : "");
+  const a = Math.max(0, i - 20);
+  return (a ? "…" : "") + t.slice(a, i + ql.length + 30) + (i + ql.length + 30 < t.length ? "…" : "");
+}
+function chNoteHTML(text){
+  let h = "", ul = false;
+  const close = () => { if (ul){ h += "</ul>"; ul = false; } };
+  String(text || "").split("\n").forEach(l => {
+    const t = l.trim(); if (!t) return;
+    if (t.startsWith("■")){ close(); h += `<h4>${esc(t.slice(1).trim())}</h4>`; }
+    else if (t.startsWith("・")){ if (!ul){ h += "<ul>"; ul = true; } h += `<li>${esc(t.slice(1).trim())}</li>`; }
+    else { close(); h += `<p>${esc(t)}</p>`; }
+  });
+  close();
+  return `<div class="chnote">${h}</div>`;
+}
+function chChipIntoView(){ const on = document.querySelector("#chap-chips .chip.on"); if (on && on.scrollIntoView) on.scrollIntoView({ inline: "center", block: "nearest" }); }
+function chapHTML(){
+  const list = chList();
+  if (!list.length) return `<div class="card"><p class="muted">章のデータ（chapters.js）を読み込めませんでした。</p></div>`;
+  const ch = chOf(S.note.chap); S.note.chap = ch.no;
+  const i = list.indexOf(ch), n = ch.qa.length, have = chCards(ch), inSrs = have.filter(c => c.srs !== false).length;
+  const prev = list[i - 1], next = list[i + 1];
+  let h = `<div class="chips" id="chap-chips">${list.map(c => `<button class="chip ${c.no === ch.no ? "on" : ""}" data-act="chSel" data-d="${c.no}">${c.no} ${esc(c.short)}</button>`).join("")}</div>`;
+  h += `<div class="card"><div class="stepper"><button class="mini" data-act="chStep" data-v="-1" ${prev ? "" : "disabled"}>‹ 前</button>
+    <div style="text-align:center;padding:0 6px"><div class="muted small">第${ch.no}章 ／ 全${list.length}章</div><b style="font-size:17px">${esc(ch.title)}</b></div>
+    <button class="mini" data-act="chStep" data-v="1" ${next ? "" : "disabled"}>次 ›</button></div></div>`;
+  h += `<div class="card"><h2>まとめ</h2>${chNoteHTML(ch.note)}
+    <p class="muted small" style="margin:12px 0 0">Claude が作ったまとめです。教科書・資料集と違うところがあったら教えてね。自分のまとめは「地域ごと」「年代ごと」に書けるよ。</p></div>`;
+  h += `<div class="card"><h2>この章の一問一答（${n}問）</h2>`;
+  if (have.length < n){
+    const rest = have.length ? "残りを" : "";
+    h += `<p class="muted small" style="margin-top:-4px">${have.length ? `${have.length}問は追加済み。残り${n - have.length}問を追加できるよ。` : "通史で習った章から追加していくのがおすすめ。"}タグ「${esc(chTag(ch))}」がつきます。</p>
+      <div class="btns"><button class="btn" data-act="chAdd" data-v="1">${rest}毎日の復習に入れて追加</button></div>
+      <div class="btns"><button class="btn line" data-act="chAdd" data-v="0">${rest}練習用に追加（復習には入れない）</button></div>`;
+  }
+  if (have.length){
+    const allIn = inSrs === have.length;
+    h += `<div class="kv"><span>追加済み</span><span>${have.length} / ${n}問</span></div>
+      <div class="kv"><span>毎日の復習に入っている</span><span>${inSrs}問</span></div>
+      <div class="btns"><button class="btn sec" data-act="chPractice">この章を練習する（何周でも）</button></div>
+      <div class="btns"><button class="btn line" data-act="chSrs" data-v="${allIn ? 0 : 1}">${allIn ? "この章を毎日の復習から外す" : "この章を全部、毎日の復習に入れる"}</button></div>
+      <div class="btns"><button class="btn danger ${S.note.chDel === ch.no ? "sure" : ""}" data-act="chDel">${S.note.chDel === ch.no ? "本当に削除する（この章の復習の記録も消えます）" : "この章の問題をアプリから削除"}</button></div>`;
+  }
+  h += `<details><summary>問題と答えを一覧で見る</summary><div class="qa">${ch.qa.map(([q, a]) => `<p>${esc(q)}<b>${esc(a)}</b></p>`).join("")}</div></details></div>`;
+  if (next) h += `<button class="btn line" data-act="chStep" data-v="1" data-top="1">次の章へ：第${next.no}章 ${esc(next.short)} ›</button>`;
+  return h;
+}
+function chapPromoHTML(){
+  const list = chList(); if (!list.length) return "";
+  const ids = liveIds(), total = list.reduce((s, c) => s + c.qa.length, 0);
+  const have = list.reduce((s, c) => s + c.qa.filter(([q]) => ids.has(chId(c, q))).length, 0);
+  return `<div class="card"><h2>章別の一問一答とまとめ</h2><p class="muted small" style="margin-top:-4px">教科書の流れに沿った全${list.length}章・${total}問（Claude 作成）。章ごとのまとめを読んで、その章の問題をまとめて追加できるよ。${have ? `いま${have}問を追加済み。` : ""}</p>
+    <button class="btn sec" data-act="goChap">ノートの「章ごと」を開く</button></div>`;
 }
 
 /* ---------- 画面：一覧・設定 ---------- */
@@ -1157,6 +1229,49 @@ const act = {
   async copyPrompt(el){
     try{ await navigator.clipboard.writeText(el.dataset.k === "event" ? PROMPT_EVENT : PROMPT_CARD); toast("コピーしました。Claude に貼ってね"); }
     catch(e){ toast("コピーできませんでした。上の文を長押しでコピーしてね"); }
+  },
+  /* 章別 */
+  chSel(el){ S.note.chap = +el.dataset.d; S.note.chDel = null; lsSet(LS.chap, S.note.chap); renderNoteBody(); chChipIntoView(); },
+  chStep(el){
+    const list = chList(), i = list.findIndex(c => c.no === S.note.chap) + +el.dataset.v;
+    if (i < 0 || i >= list.length) return;
+    S.note.chap = list[i].no; S.note.chDel = null; lsSet(LS.chap, S.note.chap); renderNoteBody();
+    if (el.dataset.top) window.scrollTo(0, 0);
+    chChipIntoView();
+  },
+  chOpen(el){
+    S.note.q = ""; S.note.mode = "chap"; S.note.chap = +el.dataset.d; S.note.chDel = null; lsSet(LS.chap, S.note.chap);
+    S.view = "note"; renderMain(); window.scrollTo(0, 0); chChipIntoView();
+  },
+  goChap(){ S.note.q = ""; S.note.mode = "chap"; S.note.chDel = null; S.view = "note"; renderMain(); window.scrollTo(0, 0); chChipIntoView(); },
+  chAdd(el){
+    const ch = chOf(S.note.chap); if (!ch) return;
+    const srs = el.dataset.v === "1", t = Date.now(), tag = chTag(ch); let n = 0;
+    ch.qa.forEach(([q, a], i) => {
+      const id = chId(ch, q); if (card(id)) return;
+      putCard({ id, deck: DEFAULT_DECK, tags: [tag], front: q, back: a, memo: "", created: t + i, due: t,
+                interval: 0, ease: 2.5, reps: 0, lapses: 0, srs });
+      n++;
+    });
+    S.note.chDel = null; commit();
+    toast(`${n}問を追加しました` + (srs ? "（今日の復習に入りました）" : "（練習で使えます）")); renderNoteBody();
+  },
+  chSrs(el){
+    const ch = chOf(S.note.chap); if (!ch) return;
+    const on = el.dataset.v === "1", list = chCards(ch);
+    list.forEach(c => updateCard(c.id, { srs: on }));
+    commit(); toast(on ? `${list.length}問を毎日の復習に入れました` : `${list.length}問を毎日の復習から外しました`); renderNoteBody();
+  },
+  chDel(){
+    const ch = chOf(S.note.chap); if (!ch) return;
+    if (S.note.chDel !== ch.no){ S.note.chDel = ch.no; renderNoteBody(); return; }
+    let n = 0; chCards(ch).forEach(c => { deleteCard(c.id); n++; });
+    S.note.chDel = null; commit(); toast(n + "問を削除しました"); renderNoteBody();
+  },
+  chPractice(){
+    const ch = chOf(S.note.chap); if (!ch) return;
+    S.pset.deck = "すべて"; S.pset.tag = chTag(ch); S.practice = null; S.session = null;
+    S.view = "practice"; renderMain(); window.scrollTo(0, 0);
   },
   starterAdd(){
     let n = 0;
