@@ -7,6 +7,7 @@
  *     一問一答 … front / back / memo
  *     出来事   … kind:"event"。年号(year, yearEnd)・地域(region)・説明(desc)つき。front/back は自動で作る
  *     まとめメモ … kind:"note"。key は「地域|世紀」
+ *     事典の直し・追加 … kind:"jt"。id は「jt|項目名」、data に項目の中身
  */
 const DAY = 86400000;
 const DEFAULT_DECK = "世界史";
@@ -52,6 +53,7 @@ const S = {
   aev: { title: "", year: "", region: "", desc: "", tags: "", related: "", srs: true },
   yset: { mode: "sort", region: "すべて", from: "", to: "", tag: "", n: 4, near: false, total: 10 },
   yd: null,
+  jt: { type: "E", ch: 0, q: "" },
   note: { mode: "chap", region: null, cent: null, line: "すべて", q: "", chap: lsGet(LS.chap, 1), chDel: null },
   q: "", listDeck: "すべて", listKind: "all",
   sheet: [], edit: null, confirmDel: false,
@@ -66,7 +68,7 @@ function nl(s){ return esc(s).replace(/\n/g, "<br>"); }
 function startOfDay(t){ const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
 function endOfToday(){ return startOfDay(Date.now()) + DAY - 1; }
 function newId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
-function live(){ return S.cards.filter(c => !c.deleted && c.kind !== "note" && c.kind !== "meta"); }
+function live(){ return S.cards.filter(c => !c.deleted && c.kind !== "note" && c.kind !== "meta" && c.kind !== "jt"); }
 function card(id){ return S.cards.find(c => c.id === id && !c.deleted); }
 function isEv(c){ return !!c && c.kind === "event" && Number.isFinite(c.year); }
 function evs(){ return live().filter(isEv); }
@@ -329,6 +331,7 @@ function refreshAfterSync(){
   if (S.view === "home") renderMain();
   else if (S.view === "list") renderListItems();
   else if (S.view === "note") renderNoteBody();
+  else if (S.view === "jiten") renderJtBody();
   else if (S.view === "year" && !S.yd) renderMain();
   else if (S.view === "settings" && !S.form) renderMain();
 }
@@ -386,6 +389,7 @@ function homeHTML(){
       <li>「問題」で範囲を選んで解き、覚えたい問題を毎日の復習に送ると、忘れかけたころに出てくる</li>
       <li>「ノート」の「章ごと」で、教科書の流れに沿った全24章のまとめを読み、その章の一問一答をまとめて追加できる</li>
       <li>「年号」で並び替え・年号当て、「ノート」で地域ごと・年代ごとのまとめが見られる</li>
+      <li>「事典」で、出来事の原因・結果・関連人物、人物が何をしたか、国ごとの流れが見られる</li>
       <li>好きな範囲を何周もしたいときは「練習」</li></ol></div>`;
   }
   return h;
@@ -419,6 +423,7 @@ function qHTML(c, shown){
       if (c.memo) h += `<details><summary>メモを見る</summary><div>${esc(c.memo)}</div></details>`;
       const rel = eventsIn(c);
       if (rel.length) h += `<div class="muted small" style="margin-top:10px">関連する出来事</div><div class="chipline" style="margin-top:4px">${rel.map(evChip).join("")}</div>`;
+      h += jtChipsFor(c.front + "\n" + c.back);
     }
   }
   return h + `</div>`;
@@ -532,6 +537,7 @@ function quizHTML(){
   if (Q.shown){
     h += `<div class="back">${nl(c.back)}</div>`;
     if (c.memo) h += `<details><summary>メモを見る</summary><div>${esc(c.memo)}</div></details>`;
+    h += jtChipsFor(c.front + "\n" + c.back);
   }
   h += `</div>`;
   if (!Q.shown) return h + `<button class="btn" data-act="qShow">答えを見る</button>` + quizLinks(c);
@@ -806,8 +812,10 @@ function searchHTML(q, list){
   const cardHits = live().filter(c => !isEv(c) && has([c.front, c.back, c.memo, ...tagsOf(c)]));
   const ids = liveIds(), chHits = chList().filter(c => has([c.title, c.short, c.note]));
   const qaHits = chList().flatMap(c => c.qa.filter(([qq, a]) => !ids.has(chId(c, qq)) && has([qq, a])).map(([qq, a]) => ({ c, q: qq, a })));
-  if (!evHits.length && !memoHits.length && !cardHits.length && !chHits.length && !qaHits.length) return `<div class="card"><p class="muted">「${esc(q)}」は見つかりませんでした。</p></div>`;
-  let h = "";
+  const jtHits = jt().list.filter(e => has([e.name, ...e.al.map(jtAl), e.d]));
+  const jtCard = jtHits.length ? `<div class="card"><h2>事典（${jtHits.length}）</h2>${jtHits.sort(jtByYear).slice(0, 60).map(e => jtRow(e, { desc: true })).join("")}</div>` : "";
+  if (!evHits.length && !memoHits.length && !cardHits.length && !chHits.length && !qaHits.length && !jtHits.length) return `<div class="card"><p class="muted">「${esc(q)}」は見つかりませんでした。</p></div>`;
+  let h = jtCard;
   if (chHits.length) h += `<div class="card"><h2>章のまとめ（${chHits.length}）</h2>${chHits.map(c => `<button class="item" data-act="chOpen" data-d="${c.no}"><div class="iq">第${c.no}章 ${esc(c.title)}</div><div class="im">${esc(chSnippet(c.note, ql))}</div></button>`).join("")}</div>`;
   if (evHits.length) h += `<div class="card"><h2>出来事（${evHits.length}）</h2>${evHits.slice(0, 100).map(e => evRow(e, { region: true, desc: true })).join("")}</div>`;
   if (memoHits.length) h += `<div class="card"><h2>まとめ（${memoHits.length}）</h2>${memoHits.map(n => `<div class="muted small" style="margin-top:8px">${esc(noteLabel(n.key || "|"))}</div>${memoView(n.key)}`).join("")}</div>`;
@@ -970,6 +978,7 @@ function chapHTML(){
     <button class="mini" data-act="chStep" data-v="1" ${next ? "" : "disabled"}>次 ›</button></div></div>`;
   h += `<div class="card"><h2>まとめ</h2>${chNoteHTML(ch.note)}
     <p class="muted small" style="margin:12px 0 0">Claude が作ったまとめです。教科書・資料集と違うところがあったら教えてね。自分のまとめは「地域ごと」「年代ごと」に書けるよ。</p></div>`;
+  h += jtChapCardHTML(ch);
   h += `<div class="card"><h2>この章の一問一答（${n}問）</h2>`;
   if (have.length < n){
     const rest = have.length ? "残りを" : "";
@@ -995,6 +1004,291 @@ function chapPromoHTML(){
   const have = list.reduce((s, c) => s + c.qa.filter(([q]) => ids.has(chId(c, q))).length, 0);
   return `<div class="card"><h2>章別の一問一答とまとめ</h2><p class="muted small" style="margin-top:-4px">教科書の流れに沿った全${list.length}章・${total}問（Claude 作成）。章ごとのまとめを読んで、その章から問題を出したり、まとめて毎日の復習に入れたりできるよ。${have ? `いま${have}問を追加済み。` : ""}</p>
     <button class="btn sec" data-act="goChap">ノートの「章ごと」を開く</button></div>`;
+}
+
+/* ---------- 事典（jiten.js）：出来事・人物・国のつながり ---------- */
+/*
+ * 形式は jiten.js の先頭を参照。自分で直した内容・追加した項目は kind:"jt"（id は「jt|名前」）として同期する。
+ */
+const JT_TYPES = { E: "出来事", P: "人物", C: "国" };
+// 項目名をふくむが別のものを指すことば（リンクにしない）
+const JT_STOP = ["太武帝", "商業ルネサンス", "南ネーデルラント継承戦争", "ワット=タイラー"];
+let JTC = null;
+function jtSplit(s, re){ return String(s || "").split(re).map(x => x.trim()).filter(Boolean); }
+function jtNames(s){ return jtSplit(s, /[、,，]/); }
+function jtItems(s){ return jtSplit(s, /[／\n]/); }
+function jtBlank(t){ return { t, name: "", yt: "", cs: [], ch: [], d: "", c: [], r: [], p: [], x: [], f: [], region: "", al: [], memo: "" }; }
+// 「1077」「1337〜1453」「在位1643〜1715」のほか「前5世紀半ば」「16世紀前半」などの世紀表記も、並べ替え用のおよその年にする
+function jtYear(t){
+  const s = z2h(String(t || "")).trim();
+  const p = parseYearText(s.replace(/^[^\d前\-]+/, ""));
+  if (p) return p;
+  return jtYearRough(s);
+}
+function jtYearRough(s){
+  if (s.includes("世紀")){
+    const c = s.match(/(前)?(\d{1,2})/);
+    if (c){
+      const n = +c[2], start = c[1] ? -n * 100 : (n - 1) * 100, rest = s.slice(c.index + c[0].length, c.index + c[0].length + 6);
+      const off = /^世紀初/.test(rest) ? 10 : /^世紀前半/.test(rest) ? 25 : /^世紀後半/.test(rest) ? 75 : /^世紀末/.test(rest) ? 90 : 50;
+      return { year: start + off, yearEnd: null, approx: true, raw: true };
+    }
+  }
+  const m = s.match(/(前)?(\d{1,4})/);
+  return m ? { year: m[1] ? -(+m[2]) : +m[2], yearEnd: null, approx: false, raw: true } : null;
+}
+function jtParse(text){
+  const out = []; let cur = null;
+  String(text || "").split(/\r?\n/).forEach(raw => {
+    const line = raw.trim(), i = line.indexOf("|"); if (i < 1) return;
+    const k = line.slice(0, i), v = line.slice(i + 1).trim(), parts = v.split("|").map(s => s.trim());
+    if (k === "E" || k === "P" || k === "C"){
+      cur = jtBlank(k); cur.name = parts[0];
+      if (k === "C"){ cur.region = parts[1] || ""; cur.al = jtNames(parts[2]); }
+      else { cur.yt = parts[1] || ""; cur.cs = jtNames(parts[2]); cur.ch = jtNames(parts[3]).map(Number).filter(Boolean); }
+      if (cur.name) out.push(cur);
+      return;
+    }
+    if (!cur) return;
+    if (k === "d") cur.d += (cur.d ? "\n" : "") + v;
+    else if (k === "c") cur.c.push(...jtItems(v));
+    else if (k === "r") cur.r.push(...jtItems(v));
+    else if (k === "p") cur.p.push(...jtNames(v));
+    else if (k === "x") cur.x.push(...jtNames(v));
+    else if (k === "f") cur.f.push([parts[0] || "", parts.slice(1).join("｜")]);
+  });
+  return out;
+}
+function jtStamp(){ let n = 0, s = 0; for (const c of S.cards) if (typeof c.id === "string" && c.id.startsWith("jt|")){ n++; s += c.updatedAt || 0; } return n + ":" + s; }
+function jt(){
+  const st = jtStamp();
+  if (JTC && JTC.st === st) return JTC;
+  const by = new Map();
+  (typeof JITEN === "string" ? jtParse(JITEN) : []).forEach(e => { e.base = true; if (!by.has(e.name)) by.set(e.name, e); });
+  S.cards.forEach(c => {
+    if (c.deleted || c.kind !== "jt" || !c.data || typeof c.id !== "string") return;
+    const name = c.id.slice(3), b = by.get(name);
+    by.set(name, Object.assign(jtBlank((b && b.t) || c.data.t || "E"), b || {}, c.data, { name, base: !!b, edited: true, cid: c.id }));
+  });
+  const list = [...by.values()];
+  list.forEach(e => { const y = e.t === "C" ? null : jtYear(e.yt); e.year = y ? y.year : null; e.yearEnd = y ? y.yearEnd : null; e.approx = !!(y && y.approx); e.yraw = !!(y && y.raw); });
+  const alias = new Map();
+  const auto = list.map(e => e.name);
+  list.forEach(e => (e.al || []).forEach(a0 => {
+    const a = jtAl(a0); if (!a || by.has(a) || alias.has(a)) return;
+    alias.set(a, e); if (a0[0] !== "!") auto.push(a);   // 「!」つきの呼び方は文中で自動リンクしない
+  }));
+  auto.push(...JT_STOP);
+  const names = auto.filter(n => n.length >= 2).sort((a, b) => b.length - a.length);
+  const re = names.length ? new RegExp(names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g") : null;
+  JTC = { st, list, by, alias, re, back: null };
+  return JTC;
+}
+function jtAl(a){ return String(a || "").replace(/^!/, ""); }
+function jtGet(n){ if (!n) return null; const J = jt(); return J.by.get(n) || J.alias.get(n) || J.by.get(stripParen(n)) || null; }
+function jtCountry(n){ const e = jtGet(n); return e && e.t === "C" ? e : null; }
+// 名前の途中に一致しただけのもの（「インド」と「インドネシア」、「ナポレオン」と「ナポレオン3世」など）は除く
+function jtEdge(s, a, b){
+  const n = s.slice(a, b), pre = s[a - 1] || "", nx = s[b] || "", K = /[ァ-ヶー]/;
+  if (K.test(n[0]) && /[ァ-ヶー=＝]/.test(pre)) return false;
+  if (K.test(n[n.length - 1]) && /[ァ-ヶー=＝0-9０-９]/.test(nx)) return false;
+  return true;
+}
+function jtScan(text, fn){
+  const J = jt(), s = String(text || ""); if (!J.re || !s) return;
+  const re = new RegExp(J.re.source, "g"); let m;
+  while ((m = re.exec(s))){ if (jtEdge(s, m.index, m.index + m[0].length)) fn(m[0], m.index); }
+}
+function jtFind(text){ const out = []; jtScan(text, n => { const e = jtGet(n); if (e && !out.includes(e)) out.push(e); }); return out; }
+// 文中の項目名をリンクにする（同じ項目は最初の1回だけ）
+function jtLinkify(text, self){
+  const s = String(text || ""); let h = "", last = 0; const used = new Set([jtGet(self)]);
+  jtScan(s, (n, a) => {
+    const e = jtGet(n);
+    if (!e || used.has(e) || a < last) return; used.add(e);
+    h += nl(s.slice(last, a)) + `<button class="jl" data-act="jt" data-n="${esc(n)}">${esc(n)}</button>`; last = a + n.length;
+  });
+  return h + nl(s.slice(last));
+}
+function jtBack(){
+  const J = jt(); if (J.back) return J.back;
+  const B = new Map(), get = e => { if (!B.has(e)) B.set(e, { inP: [], inX: [], causeOf: [], resultOf: [], ev: [], people: [] }); return B.get(e); };
+  const push = (arr, e) => { if (!arr.includes(e)) arr.push(e); };
+  J.list.forEach(e => {
+    e.p.forEach(n => { const t = jtGet(n); if (t && t !== e) push(get(t).inP, e); });
+    e.x.forEach(n => { const t = jtGet(n); if (t && t !== e) push(get(t).inX, e); });
+    e.c.forEach(it => jtFind(it).forEach(t => { if (t !== e && t.t !== "C") push(get(t).causeOf, e); }));
+    e.r.forEach(it => jtFind(it).forEach(t => { if (t !== e && t.t !== "C") push(get(t).resultOf, e); }));
+    e.cs.forEach(n => { const t = jtCountry(n); if (t) push(e.t === "P" ? get(t).people : get(t).ev, e); });
+  });
+  J.back = B; return B;
+}
+function jtB(e){ return jtBack().get(e) || { inP: [], inX: [], causeOf: [], resultOf: [], ev: [], people: [] }; }
+function jtByYear(a, b){ return (a.year ?? 1e9) - (b.year ?? 1e9) || (a.yearEnd ?? a.year ?? 0) - (b.yearEnd ?? b.year ?? 0) || a.name.localeCompare(b.name, "ja"); }
+// 「1831〜1833、1839〜1840」のような長い書き方は、一覧では最初の年だけにする
+function jtYearShort(e){
+  if (e.yraw){ const t = e.yt || ""; if (t.length <= 10) return t; const m = t.match(/^(.*?)([〜・、])/); return m ? m[1] + (m[2] === "〜" ? "〜" : "…") : t.slice(0, 10) + "…"; }
+  return e.year == null ? "" : yearStr(e.year) + (e.yearEnd != null ? "〜" + yearStr(e.yearEnd) : "") + (e.approx ? "頃" : ""); }
+function jtCut(s, n){ s = String(s || "").split("\n")[0]; return s.length > n ? s.slice(0, n) + "…" : s; }
+function jtRow(e, o = {}){
+  const sub = e.t === "C" ? jtCut(e.d, 60) : e.t === "P" ? [e.yt, e.cs.join("・")].filter(Boolean).join(" ・ ") + (o.desc !== false && e.d ? "｜" + jtCut(e.d, 50) : "") : (o.desc && e.d ? jtCut(e.d, 60) : e.cs.join("・"));
+  const yr = e.t === "E" ? jtYearShort(e) : o.label ? JT_TYPES[e.t] : "";
+  return `<button class="ev ${o.cur ? "cur" : ""}" data-act="${o.cur ? "" : "jt"}" data-n="${esc(e.name)}">${yr || e.t === "E" ? `<span class="yr ${e.t === "E" ? "" : "jty"}">${esc(yr)}</span>` : ""}
+    <span class="evb"><span class="tt">${esc(e.name)}</span>${sub ? `<span class="ds">${esc(sub)}</span>` : ""}</span></button>`;
+}
+function jtChip(n){
+  const e = jtGet(n);
+  return e ? `<button class="rchip" data-act="jt" data-n="${esc(e.name)}">${esc(n)}</button>`
+           : `<button class="rchip gray" data-act="jtFind" data-q="${esc(stripParen(n))}">${esc(n)}</button>`;
+}
+function jtChipsFor(text){
+  const l = jtFind(text).filter(e => e.t !== "C").slice(0, 6);
+  return l.length ? `<div class="muted small" style="margin-top:10px">事典で見る</div><div class="chipline" style="margin-top:4px">${l.map(e => `<button class="rchip" data-act="jt" data-n="${esc(e.name)}">${esc(e.name)}</button>`).join("")}</div>` : "";
+}
+function jtBadge(e){ return `<span class="jtb jt${e.t}">${JT_TYPES[e.t]}</span>`; }
+function jtChLabel(e){ return e.ch.map(no => { const c = chOf(no); return c && c.no === no ? `第${no}章 ${c.short}` : `第${no}章`; }).join("・"); }
+function jtUl(items, self){ return `<ul class="jtl">${items.map(t => `<li>${jtLinkify(t, self)}</li>`).join("")}</ul>`; }
+function jtCardsAbout(e){
+  const keys = [e.name, stripParen(e.name), ...(e.al || []).map(jtAl)].filter(k => k && k.length >= 2);
+  return live().filter(c => !isEv(c) && keys.some(k => cardText(c).includes(k))).slice(0, 8);
+}
+function jtFlowNear(e, country){
+  const same = jtB(country).ev.filter(x => x.year != null).sort(jtByYear), i = same.indexOf(e);
+  if (i < 0) return "";
+  return same.slice(Math.max(0, i - 2), i).map(x => jtRow(x)).join("") + jtRow(e, { cur: true }) + same.slice(i + 1, i + 3).map(x => jtRow(x)).join("");
+}
+function jtSheetHTML(top){
+  const e = jtGet(top.n); if (!e) return null;
+  const B = jtB(e), shown = new Set([e]);
+  const rows = (title, arr, o) => { const l = arr.filter(x => !shown.has(x)); l.forEach(x => shown.add(x)); return l.length ? `<h3 class="sub">${title}</h3>` + l.map(x => jtRow(x, o)).join("") : ""; };
+  let h = sheetTop("") + `<div class="muted small">${jtBadge(e)}${e.ch.length ? " ・ " + esc(jtChLabel(e)) : ""}${e.t === "C" && e.region ? " ・ " + rDot(e.region) : ""}${e.edited ? " ・ 自分で直した項目" : ""}</div>`;
+  if (e.t === "E") h += `<div class="evy">${esc(!e.yt ? "" : e.yraw ? e.yt : jtYearShort(e) + "年")}</div>`;
+  h += `<div class="evt">${esc(e.name)}</div>`;
+  if (e.t === "P" && e.yt) h += `<div class="muted small">${esc(e.yt)}</div>`;
+  if (e.t === "C" && e.al.length) h += `<div class="muted small">ふくまれる王朝・ほかの呼び方：${esc(e.al.map(jtAl).join("・"))}</div>`;
+  if (e.d) h += `<p style="margin:6px 0 0">${jtLinkify(e.d, e.name)}</p>`;
+  if (e.t !== "C" && e.cs.length) h += `<div class="chipline">${e.cs.map(jtChip).join("")}</div>`;
+  if (e.t === "E"){
+    if (e.c.length) h += `<h3 class="sub">原因・背景</h3>` + jtUl(e.c, e.name);
+    if (e.r.length) h += `<h3 class="sub">結果・影響</h3>` + jtUl(e.r, e.name);
+    const ps = e.p.map(jtGet).filter(x => x && x.t === "P"), miss = e.p.filter(n => !jtGet(n));
+    if (ps.length || miss.length){ h += `<h3 class="sub">関連人物</h3>` + ps.map(x => jtRow(x)).join(""); ps.forEach(x => shown.add(x)); if (miss.length) h += `<div class="chipline">${miss.map(jtChip).join("")}</div>`; }
+    if (e.x.length) h += `<h3 class="sub">関連事項</h3><div class="chipline" style="margin-top:4px">${e.x.map(jtChip).join("")}</div>`;
+    h += rows("ここから起きたこと（ほかの項目の原因に登場）", B.causeOf.slice().sort(jtByYear));
+    h += rows("ここに至るまで（ほかの項目の結果に登場）", B.resultOf.slice().sort(jtByYear));
+    e.cs.map(jtCountry).filter(Boolean).filter((c, i, a) => a.indexOf(c) === i).slice(0, 3).forEach(c => {
+      const f = jtFlowNear(e, c); if (f) h += `<h3 class="sub">${esc(c.name)}の流れ（前後）</h3>` + f;
+    });
+    h += rows("ほかの項目から関連づけ", B.inX.concat(B.inP).slice().sort(jtByYear), { label: true });
+  } else if (e.t === "P"){
+    const own = e.x.map(jtGet).filter(Boolean), miss = e.x.filter(n => !jtGet(n));
+    const all = [...own, ...B.inP, ...B.inX, ...B.causeOf, ...B.resultOf].filter((x, i, a) => a.indexOf(x) === i && x !== e);
+    const evl = all.filter(x => x.t === "E").sort(jtByYear), etc = all.filter(x => x.t !== "E");
+    if (evl.length || miss.length){ h += `<h3 class="sub">関わった出来事（${evl.length}）</h3>` + evl.map(x => jtRow(x, { desc: true })).join(""); if (miss.length) h += `<div class="chipline">${miss.map(jtChip).join("")}</div>`; }
+    evl.forEach(x => shown.add(x));
+    if (etc.length) h += `<h3 class="sub">関係する人物・国</h3>` + etc.map(x => jtRow(x, { label: true })).join("");
+    etc.forEach(x => shown.add(x));
+    const cs = e.cs.map(jtCountry).filter(Boolean);
+    if (e.year != null && cs.length){
+      const near = jtB(cs[0]).people.filter(x => x !== e && x.year != null && Math.abs(x.year - e.year) <= 60 && !shown.has(x)).sort(jtByYear).slice(0, 6);
+      if (near.length) h += `<h3 class="sub">同じころの${esc(cs[0].name)}の人物</h3>` + near.map(x => jtRow(x)).join("");
+    }
+  } else {
+    if (e.f.length) h += `<h3 class="sub">流れ</h3><div class="tl">${e.f.map(([y, t]) => `<div class="tlr"><span class="yr">${esc(y)}</span><span class="tlt">${jtLinkify(t, e.name)}</span></div>`).join("")}</div>`;
+    const evl = B.ev.slice().sort(jtByYear), ppl = B.people.slice().sort(jtByYear);
+    if (evl.length) h += `<details class="jtd"><summary>この国が関わる出来事（${evl.length}）</summary>${evl.map(x => jtRow(x)).join("")}</details>`;
+    if (ppl.length) h += `<details class="jtd"><summary>この国の人物（${ppl.length}）</summary>${ppl.map(x => jtRow(x)).join("")}</details>`;
+  }
+  if (e.memo) h += `<h3 class="sub">自分のメモ</h3><div class="memo" data-act="jtEdit" data-n="${esc(e.name)}">${nl(e.memo)}</div>`;
+  const mine = e.t === "E" ? evs().filter(x => x.title === e.name || stripParen(x.title) === stripParen(e.name)) : [];
+  if (mine.length) h += `<h3 class="sub">自分の年号カード</h3>` + mine.map(x => evRow(x, { region: true })).join("");
+  const cs = e.t === "C" ? [] : jtCardsAbout(e);
+  if (cs.length) h += `<h3 class="sub">関連する一問一答</h3>` + cs.map(c => `<button class="item" data-act="edit" data-id="${esc(c.id)}"><div class="iq">${esc(c.front)}</div><div class="ia">${esc(c.back)}</div></button>`).join("");
+  const wq = encodeURIComponent(stripParen(e.name) || e.name);
+  h += `<div class="btns"><a class="btn line" href="https://ja.wikipedia.org/w/index.php?search=${wq}" target="_blank" rel="noopener noreferrer">Wikipedia</a><button class="btn sec" data-act="findIn" data-q="${esc(stripParen(e.name) || e.name)}">アプリ内で検索</button></div>`;
+  h += `<div class="btns"><button class="btn" data-act="jtEdit" data-n="${esc(e.name)}">直す・メモを書く</button></div>`;
+  if (e.base && !e.edited) h += `<p class="muted small" style="margin:10px 0 0">Claude が作った項目です。教科書・資料集とちがうところがあったら「直す」で書きかえてね。</p>`;
+  return h;
+}
+function jtForm(e, isNew){
+  return { t: e.t, name: e.name, isNew: !!isNew, base: !!e.base, edited: !!e.edited, yt: e.yt || "", cs: e.cs.join("、"), ch: e.ch.join("、"), d: e.d || "",
+    c: e.c.join("\n"), r: e.r.join("\n"), p: e.p.join("、"), x: e.x.join("、"), region: e.region || "", al: e.al.join("、"),
+    f: e.f.map(([y, t]) => `${y} ｜ ${t}`).join("\n"), memo: e.memo || "" };
+}
+function jtEditHTML(top){
+  const f = top.f, T = f.t, inp = (k, label, ph) => `<label class="f">${label}</label><input type="text" data-bind="edit.${k}" value="${esc(f[k])}" placeholder="${esc(ph || "")}">`;
+  const ta = (k, label, ph, cls) => `<label class="f">${label}</label><textarea class="${cls || "mid"}" data-bind="edit.${k}" placeholder="${esc(ph || "")}">${esc(f[k])}</textarea>`;
+  let h = sheetTop(f.isNew ? "事典に項目を追加" : "直す：" + f.name);
+  if (f.isNew) h += `<div class="seg s3">${["E", "P", "C"].map(t => `<button class="${T === t ? "on" : ""}" data-act="jtSetT" data-v="${t}">${JT_TYPES[t]}</button>`).join("")}</div>`;
+  if (f.isNew || !f.base) h += inp("name", "名前", T === "E" ? "カノッサの屈辱" : T === "P" ? "グレゴリウス7世" : "フランス");
+  if (T === "E"){
+    h += inp("yt", "年（例：1077、前221、1337〜1453）", "1077") + inp("cs", "関わった国（「、」で区切る）", "神聖ローマ帝国、ローマ教皇")
+      + ta("d", "説明", "") + ta("c", "原因・背景（1行に1つ）", "叙任権をめぐる対立") + ta("r", "結果・影響（1行に1つ）", "教皇権の伸長")
+      + inp("p", "関連人物（「、」で区切る）", "グレゴリウス7世、ハインリヒ4世") + inp("x", "関連事項（「、」で区切る）", "叙任権闘争");
+  } else if (T === "P"){
+    h += inp("yt", "生没年・在位など", "在位1056〜1106") + inp("cs", "国（「、」で区切る）", "神聖ローマ帝国") + ta("d", "何をした人物か", "")
+      + inp("x", "関わった出来事・事項（「、」で区切る）", "カノッサの屈辱、叙任権闘争");
+  } else {
+    h += inp("region", "地域", REGIONS.join("・")) + inp("al", "ほかの呼び方（「、」で区切る）", "") + ta("d", "概要", "")
+      + ta("f", "流れ（1行に「年 ｜ 内容」）", "987 ｜ カペー朝が始まる", "tall");
+  }
+  if (T !== "C") h += inp("ch", "章の番号（任意・「、」で区切る）", "10");
+  h += ta("memo", "自分のメモ（覚え方・論述で使えそうなこと など）", "");
+  h += `<p class="muted small">関連人物・関連事項・原因・結果に、事典にある名前を書くと自動でリンクになるよ。</p><div class="btns"><button class="btn" data-act="jtSave">保存</button></div>`;
+  if (!f.isNew && (f.edited || !f.base)) h += `<div class="btns"><button class="btn danger ${S.confirmDel ? "sure" : ""}" data-act="jtReset">${S.confirmDel ? (f.base ? "本当にもとに戻す" : "本当に削除する") : f.base ? "Claude が作った内容にもどす" : "この項目を削除"}</button></div>`;
+  return h;
+}
+function jtLists(){
+  const J = jt(), q = S.jt.q.trim().toLowerCase();
+  if (q){
+    const has = e => [e.name, ...e.al.map(jtAl), e.yt, e.d, ...e.c, ...e.r, ...e.p, ...e.x, ...e.cs, e.memo, ...e.f.map(x => x.join(" "))].join(" ").toLowerCase().includes(q);
+    return J.list.filter(has);
+  }
+  return J.list;
+}
+function jtChipIntoView(){ const on = document.querySelector("#jt-chips .chip.on"); if (on && on.scrollIntoView) on.scrollIntoView({ inline: "center", block: "nearest" }); }
+function jitenHTML(){
+  const J = jt(), n = t => J.list.filter(e => e.t === t).length;
+  return `<input type="search" id="jq" placeholder="事典を検索（出来事・人物・国・原因・結果）" value="${esc(S.jt.q)}"><div style="height:10px"></div>
+    <div class="seg s3">${["E", "P", "C"].map(t => `<button class="${S.jt.type === t ? "on" : ""}" data-act="jtType" data-v="${t}">${JT_TYPES[t]}（${n(t)}）</button>`).join("")}</div>
+    <div style="height:10px"></div><div id="jt-body"></div>`;
+}
+function renderJtBody(){
+  const el = $("#jt-body"); if (!el) return;
+  const J = jt();
+  if (!J.list.length){ el.innerHTML = `<div class="card"><p class="muted">事典のデータ（jiten.js）を読み込めませんでした。</p></div>`; return; }
+  const q = S.jt.q.trim();
+  if (q){
+    const hit = jtLists(), g = t => hit.filter(e => e.t === t).sort(jtByYear);
+    el.innerHTML = hit.length ? ["E", "P", "C"].filter(t => g(t).length).map(t => `<div class="card"><h2>${JT_TYPES[t]}（${g(t).length}）</h2>${g(t).slice(0, 150).map(e => jtRow(e, { desc: true })).join("")}</div>`).join("")
+      : `<div class="card"><p class="muted">「${esc(q)}」は事典に見つかりませんでした。</p><button class="btn sec" data-act="findIn" data-q="${esc(q)}">ノートで検索する</button></div>`;
+    return;
+  }
+  const T = S.jt.type; let h = "";
+  if (T === "C"){
+    const cs = J.list.filter(e => e.t === "C");
+    regionOrder(cs).forEach(r => {
+      h += `<div class="card"><div class="sech">${rDot(r)}</div>${cs.filter(e => (e.region || "") === r).map(e => jtRow(e)).join("")}</div>`;
+    });
+  } else {
+    const all = J.list.filter(e => e.t === T), chs = [...new Set(all.flatMap(e => e.ch))].sort((a, b) => a - b);
+    if (S.jt.ch && !chs.includes(S.jt.ch)) S.jt.ch = 0;
+    const mine = (S.jt.ch ? all.filter(e => e.ch.includes(S.jt.ch)) : all).sort(jtByYear);
+    h += `<div class="chips" id="jt-chips">${[0, ...chs].map(no => `<button class="chip ${no === S.jt.ch ? "on" : ""}" data-act="jtCh" data-d="${no}">${no ? `${no} ${esc((chOf(no) || {}).no === no ? chOf(no).short : "")}` : "すべて"}</button>`).join("")}</div>`;
+    h += `<div class="card"><p class="muted small" style="margin:0 0 4px">${mine.length}件 ・ 古い順</p>${mine.map(e => jtRow(e, { desc: T === "E" })).join("")}</div>`;
+  }
+  h += `<div class="card"><p class="muted small" style="margin:0 0 10px">事典は Claude が作ったものです。教科書・資料集で確かめながら使って、ちがうところは項目の「直す」で書きかえてね。自分で項目を足すこともできるよ。</p>
+    <button class="btn line" data-act="jtNew">＋ 自分で項目を追加</button></div>`;
+  el.innerHTML = h;
+}
+function jtChapCardHTML(ch){
+  const l = jt().list.filter(e => e.ch.includes(ch.no)); if (!l.length) return "";
+  const ev = l.filter(e => e.t === "E").sort(jtByYear), pp = l.filter(e => e.t === "P").sort(jtByYear);
+  const chip = e => `<button class="rchip" data-act="jt" data-n="${esc(e.name)}">${esc(e.name)}</button>`;
+  return `<div class="card"><h2>この章の事典</h2><p class="muted small" style="margin-top:-4px">出来事をタップすると、原因・結果・関連人物・国の流れが見られるよ。</p>
+    ${ev.length ? `<div class="muted small">出来事（${ev.length}）</div><div class="chipline" style="margin:4px 0 10px">${ev.map(chip).join("")}</div>` : ""}
+    ${pp.length ? `<div class="muted small">人物（${pp.length}）</div><div class="chipline" style="margin:4px 0 10px">${pp.map(chip).join("")}</div>` : ""}
+    <button class="btn sec" data-act="goJiten" data-d="${ch.no}">事典でこの章を開く</button></div>`;
 }
 
 /* ---------- 画面：一覧・設定 ---------- */
@@ -1061,7 +1355,8 @@ function renderSheet(){
     const top = topSheet();
     if (!top){ sh.classList.remove("open"); S.edit = null; return; }
     S.edit = top.f || null;
-    const h = top.t === "ev" ? evSheetHTML(top) : top.t === "evEdit" ? evEditHTML(top) : top.t === "memo" ? memoSheetHTML(top) : cardSheetHTML(top);
+    const h = top.t === "ev" ? evSheetHTML(top) : top.t === "evEdit" ? evEditHTML(top) : top.t === "memo" ? memoSheetHTML(top)
+      : top.t === "jt" ? jtSheetHTML(top) : top.t === "jtEdit" ? jtEditHTML(top) : cardSheetHTML(top);
     if (h === null){ S.sheet.pop(); continue; }   // 消された項目は飛ばす
     $("#sheet-inner").innerHTML = h; sh.classList.add("open"); return;
   }
@@ -1090,6 +1385,8 @@ function evSheetHTML(top){
   let h = sheetTop("") + `<div class="muted small">${rDot(e.region)} ・ ${esc(centLabel(cent))}${tagsOf(e).length ? " ・ " + tagsOf(e).map(esc).join(" ") : ""}</div>
     <div class="evy">${esc(yearLabel(e))}</div><div class="evt">${esc(e.title)}</div>`;
   if (e.desc) h += `<p style="margin:2px 0 0">${nl(e.desc)}</p>`;
+  const je = jtGet(e.title) || jtGet(stripParen(e.title));
+  if (je) h += `<div class="chipline"><button class="rchip" data-act="jt" data-n="${esc(je.name)}">事典で原因・結果・人物を見る</button></div>`;
   if (tagsOf(e).includes("要確認")) h += `<div class="note warn small">「要確認」がついています。年号や内容を教科書・資料集で確かめてね。</div>`;
   if (linked.length || miss.length){
     h += `<h3 class="sub">関連する出来事</h3>` + linked.map(x => evRow(x, { region: true })).join("");
@@ -1127,10 +1424,11 @@ function memoSheetHTML(top){
 function renderMain(){
   const m = $("#main"), v = S.view;
   m.innerHTML = v === "home" ? homeHTML() : v === "quiz" ? quizHTML() : v === "review" ? reviewHTML() : v === "practice" ? practiceHTML()
-    : v === "year" ? yearHTML() : v === "note" ? noteHTML() : v === "add" ? addHTML() : v === "list" ? listHTML() : settingsHTML();
+    : v === "year" ? yearHTML() : v === "note" ? noteHTML() : v === "jiten" ? jitenHTML() : v === "add" ? addHTML() : v === "list" ? listHTML() : settingsHTML();
   if (v === "list") renderListItems();
   if (v === "note") renderNoteBody();
-  $("#ttl").textContent = { home: "問題", quiz: "問題", review: "復習", practice: "練習", year: "年号", note: "ノート", add: "追加", list: "一覧", settings: "設定" }[v] || "世界史";
+  if (v === "jiten"){ renderJtBody(); jtChipIntoView(); }
+  $("#ttl").textContent = { home: "問題", quiz: "問題", review: "復習", practice: "練習", year: "年号", note: "ノート", jiten: "事典", add: "追加", list: "一覧", settings: "設定" }[v] || "世界史";
   const tab = v === "review" || v === "practice" || v === "quiz" ? "home" : v;
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === tab));
   renderPill();
@@ -1142,7 +1440,7 @@ function importBackup(text){
   let data; try { data = JSON.parse(text); } catch(e){ toast("JSON を読み取れませんでした"); return; }
   const cards = Array.isArray(data) ? data : data && Array.isArray(data.cards) ? data.cards : null;
   if (!cards){ toast("問題データが見つかりませんでした"); return; }
-  const valid = cards.filter(c => c && typeof c.id === "string" && (c.deleted || c.kind === "meta" || (c.kind === "note" && typeof c.text === "string")
+  const valid = cards.filter(c => c && typeof c.id === "string" && (c.deleted || c.kind === "meta" || (c.kind === "note" && typeof c.text === "string") || (c.kind === "jt" && c.data && typeof c.data === "object")
     || (typeof c.front === "string" && typeof c.back === "string")));
   const before = S.cards.filter(c => !c.deleted).length;
   S.cards = merge(S.cards, valid); commit();
@@ -1154,6 +1452,7 @@ function setPath(p, v){ const [a, b] = p.split("."); if (S[a]) S[a][b] = v; }
 function afterEdit(){
   if (S.view === "list") renderListItems();
   else if (S.view === "note") renderNoteBody();
+  else if (S.view === "jiten") renderJtBody();
   else if (["review", "practice", "home", "year", "quiz"].includes(S.view)) renderMain();
 }
 function focusYin(){ const i = $("#yin"); if (i) i.focus(); }
@@ -1268,6 +1567,36 @@ const act = {
 
   /* シート */
   ev(el){ if (card(el.dataset.id)) pushSheet({ t: "ev", id: el.dataset.id }); },
+  jt(el){ const e = jtGet(el.dataset.n); if (e) pushSheet({ t: "jt", n: e.name }); },
+  jtType(el){ S.jt.type = el.dataset.v; S.jt.q = ""; renderMain(); window.scrollTo(0, 0); },
+  jtCh(el){ S.jt.ch = +el.dataset.d; renderJtBody(); jtChipIntoView(); },
+  jtFind(el){ closeSheet(); S.session = null; S.jt.q = el.dataset.q || ""; S.view = "jiten"; renderMain(); window.scrollTo(0, 0); },
+  goJiten(el){ closeSheet(); S.jt = { type: "E", ch: +el.dataset.d || 0, q: "" }; S.view = "jiten"; renderMain(); window.scrollTo(0, 0); },
+  jtEdit(el){ const e = jtGet(el.dataset.n); if (e) pushSheet({ t: "jtEdit", n: e.name, f: jtForm(e, false) }); },
+  jtNew(){ pushSheet({ t: "jtEdit", n: null, f: jtForm(jtBlank(S.jt.type), true) }); },
+  jtSetT(el){ const f = topSheet().f; f.t = el.dataset.v; renderSheet(); },
+  jtSave(){
+    const top = topSheet(), f = top.f, name = String(f.name || "").trim();
+    if (!name){ toast("名前を書いてね"); return; }
+    const old = top.n, clash = jt().by.get(name);
+    if ((f.isNew || name !== old) && clash){ toast("同じ名前の項目がもうあります"); return; }
+    const data = { t: f.t, yt: f.yt.trim(), cs: jtNames(f.cs), ch: jtNames(z2h(f.ch)).map(Number).filter(Boolean), d: f.d.trim(),
+      c: jtItems(f.c), r: jtItems(f.r), p: jtNames(f.p), x: jtNames(f.x), region: f.region.trim(), al: jtNames(f.al),
+      f: jtSplit(f.f, /\n/).map(l => { const m = l.match(/^(.*?)\s*[｜|]\s*(.*)$/); return m ? [m[1].trim(), m[2].trim()] : ["", l.trim()]; }),
+      memo: f.memo.trim() };
+    if (f.t !== "E"){ data.c = []; data.r = []; data.p = []; }
+    if (f.t === "C"){ data.yt = ""; data.cs = []; data.ch = []; } else { data.region = ""; data.al = []; data.f = []; }
+    if (!f.isNew && old && name !== old) putCard({ id: "jt|" + old, deleted: true });
+    putCard({ id: "jt|" + name, kind: "jt", data }); commit();
+    S.sheet.pop(); if (f.isNew){ S.jt.type = f.t; pushSheet({ t: "jt", n: name }); } else { if (topSheet() && topSheet().t === "jt") topSheet().n = name; renderSheet(); }
+    toast("保存しました"); afterEdit();
+  },
+  jtReset(){
+    if (!S.confirmDel){ S.confirmDel = true; renderSheet(); return; }
+    const top = topSheet(), base = top.f.base; putCard({ id: "jt|" + top.n, deleted: true }); commit();
+    S.sheet.pop(); if (!base) closeSheet(); else renderSheet();
+    toast(base ? "もとに戻しました" : "削除しました"); afterEdit();
+  },
   evEdit(el){ const e = card(el.dataset.id); if (isEv(e)) pushSheet({ t: "evEdit", id: e.id, f: evForm(e) }); },
   edit(el){
     const c = card(el.dataset.id); if (!c) return;
@@ -1532,6 +1861,7 @@ function onField(e){
   }
   if (t.id === "q"){ S.q = t.value; renderListItems(); }
   if (t.id === "nq"){ S.note.q = t.value; renderNoteBody(); }
+  if (t.id === "jq"){ S.jt.q = t.value; renderJtBody(); }
   if (t.id === "yin" && S.yd && S.yd.cur) S.yd.cur.input = t.value;
 }
 document.addEventListener("input", onField);

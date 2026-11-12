@@ -89,6 +89,7 @@ label.f{display:block;font-size:13px;color:var(--sub);margin:12px 0 4px}
 input[type=text],input[type=password],input[type=search],textarea{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;font-size:16px}
 textarea{resize:vertical;min-height:64px}
 textarea.tall{min-height:180px}
+textarea.mid{min-height:120px}
 .seg{display:flex;background:var(--bg);border-radius:12px;padding:4px;margin-bottom:4px}
 .seg button{flex:1;border:0;background:none;border-radius:9px;padding:8px 4px;font-size:14px;cursor:pointer;color:var(--sub)}
 .seg button.on{background:var(--card);color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -170,6 +171,19 @@ details .qa{white-space:normal}
 .qa p:last-child{border-bottom:0}
 .qa b{display:block;color:var(--accent);font-weight:600}
 h3.sub{font-size:13px;color:var(--sub);margin:18px 0 2px;font-weight:700}
+.jl{border:0;background:none;padding:0;margin:0;font:inherit;color:var(--accent);text-decoration:underline;text-decoration-color:var(--blue-l);text-underline-offset:3px;cursor:pointer;display:inline}
+.jtl{margin:4px 0 0;padding-left:1.2em}
+.jtl li{font-size:15px;margin:5px 0;line-height:1.65}
+.jtb{display:inline-block;border-radius:6px;padding:0 7px;font-size:12px;font-weight:700}
+.jtE{background:var(--soft2);color:var(--accent)}.jtP{background:#fdeedc;color:var(--amber)}.jtC{background:#dcf2e3;color:var(--green)}
+.ev .yr.jty{font-size:12px;font-weight:700;color:var(--sub);min-width:52px;padding-top:2px}
+.tl{margin-top:4px}
+.tlr{display:flex;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:15px;line-height:1.6}
+.tlr:last-child{border-bottom:0}
+.tlr .yr{flex:0 0 auto;min-width:64px;font-weight:700;color:var(--accent);font-size:14px;font-variant-numeric:tabular-nums}
+.tlr .tlt{flex:1;min-width:0}
+details.jtd{margin-top:14px;color:var(--ink)}
+details.jtd summary{font-size:14px;font-weight:700;color:var(--sub)}
 </style>
 </head>
 <body>
@@ -182,6 +196,7 @@ h3.sub{font-size:13px;color:var(--sub);margin:18px 0 2px;font-weight:700}
   <button data-act="nav" data-v="home"><span class="ic">✎</span>問題</button>
   <button data-act="nav" data-v="year"><span class="ic">⇅</span>年号</button>
   <button data-act="nav" data-v="note"><span class="ic">▤</span>ノート</button>
+  <button data-act="nav" data-v="jiten"><span class="ic">◎</span>事典</button>
   <button data-act="nav" data-v="add"><span class="ic">＋</span>追加</button>
   <button data-act="nav" data-v="list"><span class="ic">≡</span>一覧</button>
 </nav>
@@ -190,6 +205,7 @@ h3.sub{font-size:13px;color:var(--sub);margin:18px 0 2px;font-weight:700}
 <input type="file" id="import-file" accept="application/json,.json" hidden>
 <script src="starter.js"></script>
 <script src="chapters.js"></script>
+<script src="jiten.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
