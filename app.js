@@ -1055,6 +1055,7 @@ function jtParse(text){
     else if (k === "r") cur.r.push(...jtItems(v));
     else if (k === "p") cur.p.push(...jtNames(v));
     else if (k === "x") cur.x.push(...jtNames(v));
+    else if (k === "a") cur.al.push(...jtNames(v));
     else if (k === "f") cur.f.push([parts[0] || "", parts.slice(1).join("｜")]);
   });
   return out;
@@ -1102,7 +1103,7 @@ function jtScan(text, fn){
 function jtFind(text){ const out = []; jtScan(text, n => { const e = jtGet(n); if (e && !out.includes(e)) out.push(e); }); return out; }
 // 文中の項目名をリンクにする（同じ項目は最初の1回だけ）
 function jtLinkify(text, self){
-  const s = String(text || ""); let h = "", last = 0; const used = new Set([jtGet(self)]);
+  const s = String(text || ""); let h = "", last = 0; const used = new Set([].concat(self).map(jtGet));
   jtScan(s, (n, a) => {
     const e = jtGet(n);
     if (!e || used.has(e) || a < last) return; used.add(e);
@@ -1157,6 +1158,100 @@ function jtFlowNear(e, country){
   if (i < 0) return "";
   return same.slice(Math.max(0, i - 2), i).map(x => jtRow(x)).join("") + jtRow(e, { cur: true }) + same.slice(i + 1, i + 3).map(x => jtRow(x)).join("");
 }
+/* ---- つながり（関係マップ＋因果の流れ） ----
+ * 実線の矢印 … 原因・結果の文の中にその出来事が書かれている（因果のつながり）
+ * 点線      … 関連事項として結びついているだけ（因果かどうかは書かれていない）。年代で前・後に分けて置く
+ */
+function jtLinks(e){
+  const B = jtB(e), prev = new Map(), next = new Map(), bg = [], res = [];
+  const add = (m, x, why, k) => {
+    if (!x || x === e || x.t !== "E") return;
+    const o = m.get(x) || { e: x, why: [], k };
+    if (why && !o.why.includes(why)) o.why.push(why);
+    if (k === "c") o.k = "c";
+    m.set(x, o);
+  };
+  e.c.forEach(l => { const f = jtFind(l).filter(x => x.t === "E" && x !== e); f.forEach(x => add(prev, x, l, "c")); if (!f.length) bg.push(l); });
+  e.r.forEach(l => { const f = jtFind(l).filter(x => x.t === "E" && x !== e); f.forEach(x => add(next, x, l, "c")); if (!f.length) res.push(l); });
+  const lines = arr => arr.filter(l => jtFind(l).includes(e));
+  B.resultOf.forEach(x => lines(x.r).forEach(l => add(prev, x, l, "c")));   // x の結果に e が書かれている → x が前
+  B.causeOf.forEach(x => lines(x.c).forEach(l => add(next, x, l, "c")));    // x の原因に e が書かれている → x が後
+  [...prev.keys()].filter(x => next.has(x)).forEach(x => { if (e.year != null && x.year != null && x.year > e.year) prev.delete(x); else next.delete(x); });
+  const before = x => x.year != null && e.year != null && x.year < e.year;
+  [...e.x.map(jtGet), ...B.inX, ...B.inP].forEach(x => { if (x && x.t === "E" && !prev.has(x) && !next.has(x)) add(before(x) ? prev : next, x, "", "x"); });
+  const ppl = [], pp = x => { if (x && x.t === "P" && x !== e && !ppl.includes(x)) ppl.push(x); };
+  e.p.forEach(n => pp(jtGet(n))); e.x.forEach(n => pp(jtGet(n)));
+  [...e.c, ...e.r].forEach(l => jtFind(l).forEach(pp)); B.inX.forEach(pp); B.inP.forEach(pp);
+  const cs = [];
+  e.cs.forEach(n => { const c = jtCountry(n); if (!cs.some(o => (c ? o.e === c : o.n === n))) cs.push(c ? { e: c } : { n }); });
+  e.x.forEach(n => { const c = jtCountry(n); if (c && !cs.some(o => o.e === c)) cs.push({ e: c }); });
+  const known = new Set([...e.p, ...e.x].filter(n => jtGet(n))), miss = [...e.p, ...e.x].filter(n => !known.has(n) && !jtGet(n));
+  const srt = m => [...m.values()].sort((a, b) => (a.k === b.k ? 0 : a.k === "c" ? -1 : 1) || jtByYear(a.e, b.e));
+  return { prev: srt(prev), next: srt(next), bg, res, ppl: ppl.sort(jtByYear).map(x => ({ e: x, k: "o" })), cs: cs.map(o => Object.assign(o, { k: "o" })), miss };
+}
+function jtNode(x, o = {}){
+  const y = x.t === "E" ? jtYearShort(x) : x.t === "P" ? jtCut(x.yt, 12) : "";
+  const at = o.side ? ` data-side="${o.side}" data-k="${o.k || "o"}"` : "";
+  return `<button class="jn jn${x.t}${o.k === "x" ? " rel" : ""}" data-act="jt" data-n="${esc(x.name)}"${at}>${y ? `<small>${esc(y)}</small>` : ""}<span>${esc(x.name)}</span></button>`;
+}
+function jtMapHTML(e, M){
+  const N = 4;
+  const nodes = (arr, side) => arr.slice(0, N).map(o => o.e ? jtNode(o.e, { side, k: o.k }) : `<span class="jn jnC gray" data-side="${side}" data-k="o"><span>${esc(o.n)}</span></span>`).join("")
+    + (arr.length > N ? `<span class="jmore">ほか${arr.length - N}件</span>` : "");
+  const box = (arr, side, cap) => `<div class="jm-${side}">${arr.length ? `<div class="jcap">${cap}</div><div class="jrow">${nodes(arr, side)}</div>` : ""}</div>`;
+  const y = e.t === "E" ? (e.yraw ? jtCut(e.yt, 16) : jtYearShort(e)) : e.t === "P" ? jtCut(e.yt, 16) : "";
+  const hasX = [...M.top, ...M.bot].some(o => o.k === "x"), hasC = [...M.top, ...M.bot].some(o => o.k === "c");
+  return `<div class="jmap">${box(M.top, "top", M.capT || "前")}${box(M.left, "left", M.capL || "人物")}
+    <div class="jm-c jn${e.t}">${y ? `<small>${esc(y)}</small>` : ""}<b>${esc(e.name)}</b></div>${box(M.right, "right", M.capR || "国")}${box(M.bot, "bot", M.capB || "後")}
+    <svg class="jm-lines" aria-hidden="true"></svg></div>
+    <div class="jleg">${hasC ? `<span><i class="lc"></i>原因・結果</span>` : ""}${hasX ? `<span><i class="lx"></i>関連</span>` : ""}<span>タップでその項目へ</span></div>`;
+}
+// 線は表示されたあとに、ボタンの位置を測ってから引く
+function jtDrawMaps(){
+  document.querySelectorAll(".jmap").forEach(m => {
+    const svg = m.querySelector("svg.jm-lines"), c = m.querySelector(".jm-c"); if (!svg || !c) return;
+    const R = m.getBoundingClientRect(); if (!R.width) return;
+    const box = el => { const r = el.getBoundingClientRect(); return { l: r.left - R.left, t: r.top - R.top, r: r.right - R.left, b: r.bottom - R.top, cx: (r.left + r.right) / 2 - R.left, cy: (r.top + r.bottom) / 2 - R.top }; };
+    const C = box(c), cl = (v, a, b) => Math.max(a, Math.min(b, v));
+    const ps = [];
+    m.querySelectorAll("[data-side]").forEach(n => {
+      const p = box(n), s = n.dataset.side, k = n.dataset.k;
+      let d;
+      if (s === "top"){ const x2 = cl(p.cx, C.l + 14, C.r - 14), my = (p.b + C.t) / 2; d = `M${p.cx} ${p.b}C${p.cx} ${my} ${x2} ${my} ${x2} ${C.t - 1}`; }
+      else if (s === "bot"){ const x1 = cl(p.cx, C.l + 14, C.r - 14), my = (C.b + p.t) / 2; d = `M${x1} ${C.b}C${x1} ${my} ${p.cx} ${my} ${p.cx} ${p.t - 1}`; }
+      else if (s === "left"){ const y2 = cl(p.cy, C.t + 8, C.b - 8), mx = (p.r + C.l) / 2; d = `M${p.r} ${p.cy}C${mx} ${p.cy} ${mx} ${y2} ${C.l} ${y2}`; }
+      else { const y1 = cl(p.cy, C.t + 8, C.b - 8), mx = (C.r + p.l) / 2; d = `M${C.r} ${y1}C${mx} ${y1} ${mx} ${p.cy} ${p.l} ${p.cy}`; }
+      ps.push(`<path class="${k === "c" ? "lc" : k === "x" ? "lx" : "lo"}" d="${d}"${k === "c" ? ' marker-end="url(#jar)"' : ""}/>`);
+    });
+    svg.setAttribute("width", R.width); svg.setAttribute("height", R.height); svg.setAttribute("viewBox", `0 0 ${R.width} ${R.height}`);
+    svg.innerHTML = `<defs><marker id="jar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#2563eb"/></marker></defs>` + ps.join("");
+  });
+}
+// 因果の流れ：なぜ起きた？ → この出来事 → どうなった？
+function jtChainHTML(e, L){
+  const ev = o => `<div class="jci${o.k === "x" ? " rel" : ""}">${jtNode(o.e)}${o.why.length ? o.why.map(w => `<div class="jwhy">${jtLinkify(w, [e.name, o.e.name])}</div>`).join("") : `<div class="jwhy muted">関連事項（因果は書かれていないので、年代順でここに置いています）</div>`}</div>`;
+  const tx = (t, tag) => `<div class="jci"><span class="jtag">${tag}</span><div class="jwhy" style="margin-top:2px">${jtLinkify(t, e.name)}</div></div>`;
+  const empty = w => `<p class="muted small" style="margin:4px 0">${w}はまだ書かれていません。「直す」で書くとつながるよ。</p>`;
+  const pre = L.bg.map(t => tx(t, "背景")).join("") + L.prev.map(ev).join(""), post = L.res.map(t => tx(t, "結果")).join("") + L.next.map(ev).join("");
+  return `<h3 class="sub">因果の流れ</h3><div class="jchain">
+    <div class="jgrp"><div class="jgl">なぜ起きた？（原因・背景）</div>${pre || empty("原因・背景")}</div>
+    <div class="jdown"></div>
+    <div class="jcur"><small>${esc(e.yraw ? e.yt : jtYearShort(e))}</small><b>${esc(e.name)}</b></div>
+    <div class="jdown"></div>
+    <div class="jgrp"><div class="jgl">どうなった？（結果・影響）</div>${post || empty("結果・影響")}</div></div>`;
+}
+// 関わる国の出来事をまとめて、前後3つずつの年表にする（国ごとにくり返さない）
+function jtNearTL(e){
+  const cs = e.cs.map(jtCountry).filter((c, i, a) => c && a.indexOf(c) === i); if (!cs.length || e.year == null) return "";
+  const set = new Set(); cs.forEach(c => jtB(c).ev.forEach(x => { if (x.year != null) set.add(x); }));
+  const all = [...set].sort(jtByYear), i = all.indexOf(e); if (i < 0 || all.length < 2) return "";
+  const l = all.slice(Math.max(0, i - 3), i + 4);
+  return `<h3 class="sub">同じ国の前後の流れ（${esc(cs.map(c => c.name).join("・"))}）</h3>` + jtTL(l, e);
+}
+function jtTL(list, cur, o = {}){
+  return `<div class="jtl2">${list.map(x => `<button class="tli${x === cur ? " cur" : ""}" ${x === cur ? "" : `data-act="jt" data-n="${esc(x.name)}"`}>
+    <span class="yr">${esc(jtYearShort(x))}</span><span class="tlt"><b>${esc(x.name)}</b><small>${esc(o.desc ? jtCut(x.d, 46) : x.cs.join("・"))}</small></span></button>`).join("")}</div>`;
+}
 function jtSheetHTML(top){
   const e = jtGet(top.n); if (!e) return null;
   const B = jtB(e), shown = new Set([e]);
@@ -1167,34 +1262,28 @@ function jtSheetHTML(top){
   if (e.t === "P" && e.yt) h += `<div class="muted small">${esc(e.yt)}</div>`;
   if (e.t === "C" && e.al.length) h += `<div class="muted small">ふくまれる王朝・ほかの呼び方：${esc(e.al.map(jtAl).join("・"))}</div>`;
   if (e.d) h += `<p style="margin:6px 0 0">${jtLinkify(e.d, e.name)}</p>`;
-  if (e.t !== "C" && e.cs.length) h += `<div class="chipline">${e.cs.map(jtChip).join("")}</div>`;
   if (e.t === "E"){
-    if (e.c.length) h += `<h3 class="sub">原因・背景</h3>` + jtUl(e.c, e.name);
-    if (e.r.length) h += `<h3 class="sub">結果・影響</h3>` + jtUl(e.r, e.name);
-    const ps = e.p.map(jtGet).filter(x => x && x.t === "P"), miss = e.p.filter(n => !jtGet(n));
-    if (ps.length || miss.length){ h += `<h3 class="sub">関連人物</h3>` + ps.map(x => jtRow(x)).join(""); ps.forEach(x => shown.add(x)); if (miss.length) h += `<div class="chipline">${miss.map(jtChip).join("")}</div>`; }
-    if (e.x.length) h += `<h3 class="sub">関連事項</h3><div class="chipline" style="margin-top:4px">${e.x.map(jtChip).join("")}</div>`;
-    h += rows("ここから起きたこと（ほかの項目の原因に登場）", B.causeOf.slice().sort(jtByYear));
-    h += rows("ここに至るまで（ほかの項目の結果に登場）", B.resultOf.slice().sort(jtByYear));
-    e.cs.map(jtCountry).filter(Boolean).filter((c, i, a) => a.indexOf(c) === i).slice(0, 3).forEach(c => {
-      const f = jtFlowNear(e, c); if (f) h += `<h3 class="sub">${esc(c.name)}の流れ（前後）</h3>` + f;
-    });
-    h += rows("ほかの項目から関連づけ", B.inX.concat(B.inP).slice().sort(jtByYear), { label: true });
+    const L = jtLinks(e);
+    h += `<h3 class="sub">関係マップ</h3>` + jtMapHTML(e, { top: L.prev, bot: L.next, left: L.ppl, right: L.cs });
+    h += jtChainHTML(e, L);
+    if (L.miss.length) h += `<h3 class="sub">事典にまだない人物・事項</h3><div class="chipline" style="margin-top:4px">${L.miss.map(jtChip).join("")}</div>`;
+    h += jtNearTL(e);
   } else if (e.t === "P"){
     const own = e.x.map(jtGet).filter(Boolean), miss = e.x.filter(n => !jtGet(n));
     const all = [...own, ...B.inP, ...B.inX, ...B.causeOf, ...B.resultOf].filter((x, i, a) => a.indexOf(x) === i && x !== e);
-    const evl = all.filter(x => x.t === "E").sort(jtByYear), etc = all.filter(x => x.t !== "E");
-    if (evl.length || miss.length){ h += `<h3 class="sub">関わった出来事（${evl.length}）</h3>` + evl.map(x => jtRow(x, { desc: true })).join(""); if (miss.length) h += `<div class="chipline">${miss.map(jtChip).join("")}</div>`; }
-    evl.forEach(x => shown.add(x));
-    if (etc.length) h += `<h3 class="sub">関係する人物・国</h3>` + etc.map(x => jtRow(x, { label: true })).join("");
-    etc.forEach(x => shown.add(x));
-    const cs = e.cs.map(jtCountry).filter(Boolean);
-    if (e.year != null && cs.length){
-      const near = jtB(cs[0]).people.filter(x => x !== e && x.year != null && Math.abs(x.year - e.year) <= 60 && !shown.has(x)).sort(jtByYear).slice(0, 6);
-      if (near.length) h += `<h3 class="sub">同じころの${esc(cs[0].name)}の人物</h3>` + near.map(x => jtRow(x)).join("");
+    const evl = all.filter(x => x.t === "E").sort(jtByYear), ppl = all.filter(x => x.t === "P").sort(jtByYear);
+    const cs = [];
+    [...e.cs.map(n => jtCountry(n) || n), ...all.filter(x => x.t === "C")].forEach(c => { if (!cs.some(o => (o.e || o.n) === c)) cs.push(typeof c === "string" ? { n: c, k: "o" } : { e: c, k: "o" }); });
+    h += `<h3 class="sub">関係マップ</h3>` + jtMapHTML(e, { top: [], bot: evl.map(x => ({ e: x, k: "o" })), left: ppl.map(x => ({ e: x, k: "o" })), right: cs, capB: "関わった出来事", capL: "関係する人物" });
+    if (evl.length || miss.length){ h += `<h3 class="sub">関わった出来事の流れ（${evl.length}）</h3>` + jtTL(evl, null, { desc: true }); if (miss.length) h += `<div class="chipline">${miss.map(jtChip).join("")}</div>`; }
+    [e, ...evl, ...ppl].forEach(x => shown.add(x));
+    const c0 = e.cs.map(jtCountry).filter(Boolean)[0];
+    if (e.year != null && c0){
+      const near = jtB(c0).people.filter(x => x.year != null && Math.abs(x.year - e.year) <= 60 && !shown.has(x)).sort(jtByYear).slice(0, 6);
+      if (near.length) h += `<h3 class="sub">同じころの${esc(c0.name)}の人物</h3>` + near.map(x => jtRow(x)).join("");
     }
   } else {
-    if (e.f.length) h += `<h3 class="sub">流れ</h3><div class="tl">${e.f.map(([y, t]) => `<div class="tlr"><span class="yr">${esc(y)}</span><span class="tlt">${jtLinkify(t, e.name)}</span></div>`).join("")}</div>`;
+    if (e.f.length) h += `<h3 class="sub">流れ</h3><div class="tl rail">${e.f.map(([y, t]) => `<div class="tlr"><span class="yr">${esc(y)}</span><span class="tlt">${jtLinkify(t, e.name)}</span></div>`).join("")}</div>`;
     const evl = B.ev.slice().sort(jtByYear), ppl = B.people.slice().sort(jtByYear);
     if (evl.length) h += `<details class="jtd"><summary>この国が関わる出来事（${evl.length}）</summary>${evl.map(x => jtRow(x)).join("")}</details>`;
     if (ppl.length) h += `<details class="jtd"><summary>この国の人物（${ppl.length}）</summary>${ppl.map(x => jtRow(x)).join("")}</details>`;
@@ -1358,7 +1447,7 @@ function renderSheet(){
     const h = top.t === "ev" ? evSheetHTML(top) : top.t === "evEdit" ? evEditHTML(top) : top.t === "memo" ? memoSheetHTML(top)
       : top.t === "jt" ? jtSheetHTML(top) : top.t === "jtEdit" ? jtEditHTML(top) : cardSheetHTML(top);
     if (h === null){ S.sheet.pop(); continue; }   // 消された項目は飛ばす
-    $("#sheet-inner").innerHTML = h; sh.classList.add("open"); return;
+    $("#sheet-inner").innerHTML = h; sh.classList.add("open"); jtDrawMaps(); return;
   }
 }
 function cardSheetHTML(top){
@@ -1585,7 +1674,7 @@ const act = {
       f: jtSplit(f.f, /\n/).map(l => { const m = l.match(/^(.*?)\s*[｜|]\s*(.*)$/); return m ? [m[1].trim(), m[2].trim()] : ["", l.trim()]; }),
       memo: f.memo.trim() };
     if (f.t !== "E"){ data.c = []; data.r = []; data.p = []; }
-    if (f.t === "C"){ data.yt = ""; data.cs = []; data.ch = []; } else { data.region = ""; data.al = []; data.f = []; }
+    if (f.t === "C"){ data.yt = ""; data.cs = []; data.ch = []; } else { data.region = ""; data.f = []; }
     if (!f.isNew && old && name !== old) putCard({ id: "jt|" + old, deleted: true });
     putCard({ id: "jt|" + name, kind: "jt", data }); commit();
     S.sheet.pop(); if (f.isNew){ S.jt.type = f.t; pushSheet({ t: "jt", n: name }); } else { if (topSheet() && topSheet().t === "jt") topSheet().n = name; renderSheet(); }
@@ -1880,6 +1969,7 @@ $("#import-file").addEventListener("change", e => {
   e.target.value = "";
 });
 window.addEventListener("online", () => { renderPill(); sync(); });
+window.addEventListener("resize", () => { clearTimeout(jtDrawMaps._t); jtDrawMaps._t = setTimeout(jtDrawMaps, 120); });
 window.addEventListener("offline", renderPill);
 let lastVis = 0;
 document.addEventListener("visibilitychange", () => {
