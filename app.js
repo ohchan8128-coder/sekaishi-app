@@ -1013,7 +1013,7 @@ function chapPromoHTML(){
 const JT_TYPES = { E: "出来事", P: "人物", C: "国" };
 const JT_SITES = { "y-history.net": "世界史の窓", "kotobank.jp": "コトバンク", "ja.wikipedia.org": "Wikipedia", "historist.jp": "ヒストリスト（山川）", "nippon.com": "nippon.com" };
 // 項目名をふくむが別のものを指すことば（リンクにしない）
-const JT_STOP = ["太武帝", "商業ルネサンス", "南ネーデルラント継承戦争", "ワット=タイラー"];
+const JT_STOP = ["太武帝", "商業ルネサンス", "南ネーデルラント継承戦争", "ワット=タイラー", "教皇のバビロン捕囚"];
 let JTC = null;
 function jtSplit(s, re){ return String(s || "").split(re).map(x => x.trim()).filter(Boolean); }
 function jtNames(s){ return jtSplit(s, /[、,，]/); }
