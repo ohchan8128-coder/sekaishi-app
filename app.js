@@ -1011,13 +1011,14 @@ function chapPromoHTML(){
  * 形式は jiten.js の先頭を参照。自分で直した内容・追加した項目は kind:"jt"（id は「jt|名前」）として同期する。
  */
 const JT_TYPES = { E: "出来事", P: "人物", C: "国" };
+const JT_SITES = { "y-history.net": "世界史の窓", "kotobank.jp": "コトバンク", "ja.wikipedia.org": "Wikipedia", "historist.jp": "ヒストリスト（山川）", "nippon.com": "nippon.com" };
 // 項目名をふくむが別のものを指すことば（リンクにしない）
 const JT_STOP = ["太武帝", "商業ルネサンス", "南ネーデルラント継承戦争", "ワット=タイラー"];
 let JTC = null;
 function jtSplit(s, re){ return String(s || "").split(re).map(x => x.trim()).filter(Boolean); }
 function jtNames(s){ return jtSplit(s, /[、,，]/); }
 function jtItems(s){ return jtSplit(s, /[／\n]/); }
-function jtBlank(t){ return { t, name: "", yt: "", cs: [], ch: [], d: "", c: [], r: [], p: [], x: [], f: [], region: "", al: [], memo: "" }; }
+function jtBlank(t){ return { t, name: "", yt: "", cs: [], ch: [], d: "", c: [], r: [], p: [], x: [], f: [], region: "", al: [], src: [], memo: "" }; }
 // 「1077」「1337〜1453」「在位1643〜1715」のほか「前5世紀半ば」「16世紀前半」などの世紀表記も、並べ替え用のおよその年にする
 function jtYear(t){
   const s = z2h(String(t || "")).trim();
@@ -1056,6 +1057,7 @@ function jtParse(text){
     else if (k === "p") cur.p.push(...jtNames(v));
     else if (k === "x") cur.x.push(...jtNames(v));
     else if (k === "a") cur.al.push(...jtNames(v));
+    else if (k === "s"){ if (/^https:\/\/[^\s|]+$/.test(v)) cur.src.push(v); }
     else if (k === "f") cur.f.push([parts[0] || "", parts.slice(1).join("｜")]);
   });
   return out;
@@ -1293,6 +1295,8 @@ function jtSheetHTML(top){
   if (mine.length) h += `<h3 class="sub">自分の年号カード</h3>` + mine.map(x => evRow(x, { region: true })).join("");
   const cs = e.t === "C" ? [] : jtCardsAbout(e);
   if (cs.length) h += `<h3 class="sub">関連する一問一答</h3>` + cs.map(c => `<button class="item" data-act="edit" data-id="${esc(c.id)}"><div class="iq">${esc(c.front)}</div><div class="ia">${esc(c.back)}</div></button>`).join("");
+  const src = (e.src || []).filter(u => /^https:\/\//.test(u));
+  if (src.length) h += `<h3 class="sub">出典（調べたページ）</h3><div class="jsrc">${src.map(u => { let d = u; try { d = new URL(u).hostname.replace(/^www\./, ""); } catch(x){} return `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(JT_SITES[d] || d)}</a>`; }).join("")}</div>`;
   const wq = encodeURIComponent(stripParen(e.name) || e.name);
   h += `<div class="btns"><a class="btn line" href="https://ja.wikipedia.org/w/index.php?search=${wq}" target="_blank" rel="noopener noreferrer">Wikipedia</a><button class="btn sec" data-act="findIn" data-q="${esc(stripParen(e.name) || e.name)}">アプリ内で検索</button></div>`;
   h += `<div class="btns"><button class="btn" data-act="jtEdit" data-n="${esc(e.name)}">直す・メモを書く</button></div>`;
@@ -1302,7 +1306,7 @@ function jtSheetHTML(top){
 function jtForm(e, isNew){
   return { t: e.t, name: e.name, isNew: !!isNew, base: !!e.base, edited: !!e.edited, yt: e.yt || "", cs: e.cs.join("、"), ch: e.ch.join("、"), d: e.d || "",
     c: e.c.join("\n"), r: e.r.join("\n"), p: e.p.join("、"), x: e.x.join("、"), region: e.region || "", al: e.al.join("、"),
-    f: e.f.map(([y, t]) => `${y} ｜ ${t}`).join("\n"), memo: e.memo || "" };
+    f: e.f.map(([y, t]) => `${y} ｜ ${t}`).join("\n"), src: (e.src || []).join("\n"), memo: e.memo || "" };
 }
 function jtEditHTML(top){
   const f = top.f, T = f.t, inp = (k, label, ph) => `<label class="f">${label}</label><input type="text" data-bind="edit.${k}" value="${esc(f[k])}" placeholder="${esc(ph || "")}">`;
@@ -1322,6 +1326,7 @@ function jtEditHTML(top){
       + ta("f", "流れ（1行に「年 ｜ 内容」）", "987 ｜ カペー朝が始まる", "tall");
   }
   if (T !== "C") h += inp("ch", "章の番号（任意・「、」で区切る）", "10");
+  h += ta("src", "出典URL（1行に1つ、https:// で始まるもの）", "https://www.y-history.net/…");
   h += ta("memo", "自分のメモ（覚え方・論述で使えそうなこと など）", "");
   h += `<p class="muted small">関連人物・関連事項・原因・結果に、事典にある名前を書くと自動でリンクになるよ。</p><div class="btns"><button class="btn" data-act="jtSave">保存</button></div>`;
   if (!f.isNew && (f.edited || !f.base)) h += `<div class="btns"><button class="btn danger ${S.confirmDel ? "sure" : ""}" data-act="jtReset">${S.confirmDel ? (f.base ? "本当にもとに戻す" : "本当に削除する") : f.base ? "Claude が作った内容にもどす" : "この項目を削除"}</button></div>`;
@@ -1672,7 +1677,7 @@ const act = {
     const data = { t: f.t, yt: f.yt.trim(), cs: jtNames(f.cs), ch: jtNames(z2h(f.ch)).map(Number).filter(Boolean), d: f.d.trim(),
       c: jtItems(f.c), r: jtItems(f.r), p: jtNames(f.p), x: jtNames(f.x), region: f.region.trim(), al: jtNames(f.al),
       f: jtSplit(f.f, /\n/).map(l => { const m = l.match(/^(.*?)\s*[｜|]\s*(.*)$/); return m ? [m[1].trim(), m[2].trim()] : ["", l.trim()]; }),
-      memo: f.memo.trim() };
+      src: jtSplit(f.src, /\n/).filter(u => /^https:\/\/\S+$/.test(u)), memo: f.memo.trim() };
     if (f.t !== "E"){ data.c = []; data.r = []; data.p = []; }
     if (f.t === "C"){ data.yt = ""; data.cs = []; data.ch = []; } else { data.region = ""; data.f = []; }
     if (!f.isNew && old && name !== old) putCard({ id: "jt|" + old, deleted: true });
